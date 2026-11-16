@@ -235,3 +235,6 @@ details.settings summary::before{content:'⚙️ '}
 .penal{background:#fff6f4;border-radius:14px;padding:10px 14px;margin-top:10px;font-size:16px;line-height:1.6}
 .bigpick button:disabled{opacity:.35;cursor:not-allowed}
 .bigpick button.over{box-shadow:0 5px 0 #f1b4aa}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:7px}
+.rnum{height:48px;border-radius:12px;background:var(--mint2);border:2px solid var(--mint);font-family:'Jua';font-size:19px;color:#2f8f6c}
+.rnum.off{background:#f1f3f7;border:2px dashed #cfd6e2;color:#b3bccb;text-decoration:line-through}

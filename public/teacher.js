@@ -5,12 +5,22 @@ const app=document.getElementById('app'),modal=document.getElementById('modal');
 let L=TV?{}:loadLocal();
 L.settings={...DEF,...(L.settings||{})};
 if(L.hide==null)L.hide=false;
-let V=null,es=null,lastKey='',connected=false,gone=false;
+let V=null,es=null,lastKey='',connected=false,gone=false,rosterDraft=null;
+const rosterTarget=()=>rosterDraft||L.settings;
 
 function loadLocal(){try{return JSON.parse(localStorage.getItem('fish-teacher'))||{}}catch(e){return{}}}
 function saveLocal(){if(TV)return;try{localStorage.setItem('fish-teacher',JSON.stringify(L))}catch(e){}}
 function tvURL(){return location.origin+'/tv?c='+V.code+'&v='+V.viewKey}
 function joinURL(){return location.origin+'/s'}
+/* 학급 학생 수: 마지막 번호 + 결번(번호를 눌러 켜고 끄기) */
+function skipSet(st){return new Set((String(st.skip).match(/\d+/g)||[]).map(Number).filter(n=>n>=1&&n<=st.maxNum))}
+function rosterHTML(st,inModal){const skip=skipSet(st),n=st.maxNum-skip.size;let g='';
+  for(let i=1;i<=st.maxNum;i++)g+=`<button class="rnum ${skip.has(i)?'off':''}" data-act="rosterToggle" data-n="${i}" title="${skip.has(i)?'결번 (누르면 다시 넣어요)':'누르면 결번으로 빼요'}">${i}</button>`;
+  return `<div class="rhead"><h2>👩‍🏫 우리 반 학생 수</h2><span class="pill">학생 <b>${n}</b>명</span>${skip.size?`<span class="muted">결번: ${[...skip].sort((a,b)=>a-b).join(', ')}번</span>`:''}</div>
+    <div class="limitrow" style="background:#e6f4ff">마지막 번호 <button data-act="rosterMax" data-d="-1">−</button><b style="color:#2a86c4">${st.maxNum}</b><button data-act="rosterMax" data-d="1">+</button> 번</div>
+    <p class="muted" style="margin:10px 0 6px">전학 갔거나 없는 번호는 눌러서 빼 주세요. 다시 누르면 돌아와요.</p>
+    <div class="rgrid">${g}</div>
+    ${inModal?`<div class="startrow"><button class="btn" data-act="cancel">취소</button><button class="btn primary" data-act="rosterSave">이대로 바꾸기</button></div>`:''}`}
 function numsOf(st){const skip=new Set((String(st.skip).match(/\d+/g)||[]).map(Number));const a=[];for(let i=1;i<=st.maxNum;i++)if(!skip.has(i))a.push(i);return a}
 function label(i){const num=V.settings.nums[i],s=V.seats[num];return s&&s.nick?`${num}번 ${s.nick}`:`${num}번`}
 const isAlive=i=>!V.game.alive||V.game.alive[i];
@@ -40,7 +50,7 @@ async function act(action,extra){if(!L.auth||TV)return;const r=await post('/api/
   if(!r.ok&&r.status===404){renderIntro('방을 찾을 수 없어요. 새 방을 만들어 주세요.')}}
 
 function update(){
-  const g=V.game,key=[V.phase,g.no,g.round,g.status,V.hint,V.locked].join('|');
+  const g=V.game,key=[V.phase,g.no,g.round,g.status,V.hint,V.locked,V.settings.n,V.settings.maxNum].join('|');
   if(key!==lastKey){lastKey=key;render();return}
   if(V.phase==='pick')renderGrid();
   else if(V.phase==='lobby')renderSeats();
@@ -109,8 +119,6 @@ function renderIntro(notice){
       <details class="settings"><summary>게임 설정 바꾸기</summary>
       <p class="muted" style="margin:6px 0 0">번호 범위와 결번, 라운드, 물고기 수를 바꿀 수 있어요. 방을 만든 뒤에는 바꿀 수 없어요.</p>
       <div class="sgrid">
-        <label>마지막 번호<input type="number" min="2" max="40" data-set="maxNum" value="${st.maxNum}"></label>
-        <label>결번 (쉼표로 구분)<input type="text" data-set="skip" value="${esc(st.skip)}" placeholder="예) 16"></label>
         <label>라운드 수<input type="number" min="3" max="20" data-set="rounds" value="${st.rounds}"></label>
         <label>1인당 최대 잡기<input type="number" min="1" max="5" data-set="maxCatch" value="${st.maxCatch}"></label>
         <label>처음 물고기 수<input type="number" min="5" max="300" data-set="start" value="${st.start}"></label>
@@ -126,6 +134,7 @@ function renderIntro(notice){
       <p class="muted" style="margin-top:10px">지금 설정: 1~${st.maxNum}번${String(st.skip).trim()?` (결번 ${esc(st.skip)})`:''} · <b>${n}명</b> · ${st.rounds}라운드 · 물고기 ${st.start}/${st.cap}마리 · 번식률 ${st.growth}% · 1인당 최대 ${st.maxCatch}마리</p>
     </div>
   </div>
+  <div class="card" style="margin-top:16px" id="rosterCard">${rosterHTML(st)}</div>
   <div class="startrow"><button class="btn big primary" data-act="create">🎣 방 만들기</button></div>`;
 }
 
@@ -152,7 +161,8 @@ function renderLobby(){const st=V.settings,g=V.game;
   </div>
   <div class="card" style="margin-top:16px">
     <div class="rhead"><h2>${g.no>1?`${g.no}판째 · `:''}들어온 친구들</h2><span class="pill">들어옴 <b id="joinedCnt">0</b> / ${st.n}명</span>
-      <span class="muted">기기가 없는 친구는 게임 중에 선생님이 대신 입력할 수 있어요.</span></div>
+      <span class="muted">기기가 없는 친구는 게임 중에 선생님이 대신 입력할 수 있어요.</span>
+      ${!TV&&g.no===1?`<button class="btn small" data-act="rosterOpen" style="margin-left:auto">👩‍🏫 학생 수 바꾸기</button>`:''}</div>
     <div class="seatgrid" id="seats"></div>
     ${TV?`<p class="muted" style="text-align:center;margin-top:18px;font-size:17px">모두 들어오면 선생님이 1라운드를 시작해요 🐟</p>`:`<div class="startrow">${lockBtn()}<button class="btn big primary" data-act="open">🎣 ${g.no>1?'다시 ':''}1라운드 시작!</button></div>`}
   </div>`;
@@ -325,6 +335,15 @@ document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-ac
     case 'hide':L.hide=!L.hide;saveLocal();renderPlay();break;
     case 'hint':act('hint');break;
     case 'lock':act('lock');break;
+    case 'rosterToggle':case 'rosterMax':{const st=rosterTarget();
+      if(a==='rosterMax')st.maxNum=Math.max(2,Math.min(40,st.maxNum+ +b.dataset.d));
+      else{const sk=skipSet(st),k=+b.dataset.n;if(sk.has(k))sk.delete(k);else if(st.maxNum-sk.size>2)sk.add(k);st.skip=[...sk].sort((x,y)=>x-y).join(', ')}
+      const sk=skipSet(st);st.skip=[...sk].sort((x,y)=>x-y).join(', ');
+      if(rosterDraft){document.getElementById('rosterBox').innerHTML=rosterHTML(st,true)}else{saveLocal();renderIntro()}break}
+    case 'rosterOpen':rosterDraft={maxNum:V.settings.maxNum,skip:V.settings.skip};
+      modal.innerHTML=`<div class="back"><div class="box" id="rosterBox" style="max-width:640px">${rosterHTML(rosterDraft,true)}</div></div>`;break;
+    case 'rosterSave':{const d=rosterDraft;rosterDraft=null;modal.innerHTML='';L.settings.maxNum=d.maxNum;L.settings.skip=d.skip;saveLocal();
+      act('roster',{maxNum:d.maxNum,skip:d.skip});break}
     case 'resolve':tryResolve(false);break;
     case 'resolveForce':tryResolve(true);break;
     case 'next':modal.innerHTML='';act('next');window.scrollTo({top:0,behavior:'smooth'});break;
@@ -336,7 +355,7 @@ document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-ac
       if(d[k]&&['reveal','ret','ban'].includes(k)){d.grad=d.cap=false}
       saveLocal();document.getElementById('promiseCard').innerHTML=promiseHTML();break}
     case 'limit':{const d=pactDraft();d.limit=Math.max(0,Math.min(V.settings.maxCatch,d.limit+ +b.dataset.d));saveLocal();document.getElementById('promiseCard').innerHTML=promiseHTML();break}
-    case 'cancel':modal.innerHTML='';break;
+    case 'cancel':modal.innerHTML='';rosterDraft=null;break;
     case 'yes':modal.innerHTML='';confirmBox.cb&&confirmBox.cb();break;
   }});
 document.addEventListener('input',ev=>{if(ev.target.id==='ruleTxt'){L.ruleDraft=ev.target.value;saveLocal()}});

@@ -266,6 +266,16 @@ function teacherAct(room, b) {
     case 'lock':
       room.locked = !room.locked;
       break;
+    case 'roster': {
+      // 학생 수(마지막 번호·결번)는 첫 판 시작 전 대기실에서만 바꿀 수 있음
+      if (room.phase !== 'lobby' || g.history.length || room.gameNo !== 1) break;
+      room.settings = clampSettings({ ...st, maxNum: b.maxNum, skip: cleanText(b.skip, 120) });
+      for (const n in room.seats) if (!room.settings.nums.includes(+n)) delete room.seats[n];
+      room.pact = clampPact(room.pact, room.settings);
+      room.gameNo--;
+      freshGame(room);
+      break;
+    }
     case 'kick':
       delete room.seats[+b.num];
       break;
