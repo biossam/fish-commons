@@ -38,7 +38,11 @@ function roundMsg(e,status,st){
   if(status==='collapsed')return{cls:'bad',msg:e.demand>e.before?`잡으려던 물고기는 <b>${e.demand}마리</b>인데, 호수에는 <b>${e.before}마리</b>밖에 없었어요! 호수가 텅 비어서 더 이상 물고기가 태어날 수 없어요. 😵`:`호수의 물고기를 모두 잡아 버렸어요! 새끼를 낳을 물고기가 한 마리도 남지 않았어요. 😵`};
   if(e.after>=e.before)return{cls:'good',msg:`호수가 건강해요! 물고기가 <b>${e.after}마리</b> 있어요. 😊`};
   const drop=e.before-e.after;return{cls:e.after<st.cap*.4?'bad':'warn',msg:`호수의 물고기가 <b>${drop}마리</b> 줄었어요. 이대로 계속 잡으면 어떻게 될까요? 🤔`}}
-async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let j={};try{j=await r.json()}catch(e){}return{ok:r.ok,status:r.status,data:j}}
+async function post(url,body){let r;try{r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}catch(e){return{ok:false,status:0,data:{error:'인터넷 연결이 불안정해요. 다시 눌러 주세요.'}}}
+  let j={};try{j=await r.json()}catch(e){}return{ok:r.ok,status:r.status,data:j}}
+/* 화면 아래 잠깐 뜨는 알림 */
+function toast(msg,bad){let t=document.getElementById('toast');if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}
+  t.textContent=msg;t.className='toast show'+(bad?' bad':'');clearTimeout(toast.h);toast.h=setTimeout(()=>{t.className='toast'},3200)}
 /* 우리 반 약속 · 벌칙 */
 const PACT_INFO=[
   {k:'reveal',e:'📢',t:'알리기',d:'라운드가 끝나면 약속을 어긴 친구가 <b>몇 명</b>인지 TV에 알려요. 이름은 나오지 않아요.'},

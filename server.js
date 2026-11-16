@@ -165,7 +165,9 @@ function teacherView(room) {
   const on = onlineSids(room);
   const seats = {};
   for (const n in room.seats) seats[n] = { nick: room.seats[n].nick, online: on.has(room.seats[n].sid) };
-  return { role: 't', code: room.code, settings: room.settings, phase: room.phase, rule: room.rule, pact: room.pact, hint: room.hint, locked: room.locked, viewKey: room.viewKey, seats, game: room.game, past: room.past };
+  const sids = {};
+  for (const n in room.seats) sids[n] = room.seats[n].sid; // 서버가 다시 시작될 때 방을 되살리기 위한 백업용 (선생님 화면만)
+  return { role: 't', code: room.code, settings: room.settings, phase: room.phase, rule: room.rule, pact: room.pact, hint: room.hint, locked: room.locked, viewKey: room.viewKey, gameNo: room.gameNo, seats, sids, game: room.game, past: room.past };
 }
 // TV 화면: 누가 냈는지만 보이고, 몇 마리 골랐는지는 보내지 않음
 function displayView(room) {
@@ -173,6 +175,7 @@ function displayView(room) {
   const g = room.game;
   v.role = 'd';
   delete v.viewKey;
+  delete v.sids;
   // 출어 금지인 친구도 TV에서는 '제출'로 보여서 누가 벌칙을 받는지 드러나지 않게 함
   const show = !!(g.pact.reveal || g.pact.grad);
   v.game = {
@@ -206,13 +209,22 @@ function studentView(room, sid) {
     submitted: g.picks.filter((p, j) => p != null && g.alive[j] && !g.banned[j]).length, joined: Object.keys(room.seats).length,
   };
 }
+// 같은 내용이면 다시 보내지 않음 (학생 화면은 다른 친구가 고를 때 '제출 인원'만 바뀜)
 function sendTo(c, room) {
   const v = c.role === 't' ? teacherView(room) : c.role === 'd' ? displayView(room) : studentView(room, c.sid);
-  try { c.res.write(`data: ${JSON.stringify(v)}\n\n`); } catch (e) { /* 끊긴 연결 */ }
+  const txt = JSON.stringify(v);
+  if (txt === c.last) return;
+  c.last = txt;
+  try { c.res.write(`data: ${txt}\n\n`); } catch (e) { /* 끊긴 연결 */ }
 }
+// 여러 명이 동시에 누르면 0.12초 동안 모았다가 한 번에 보냄 (데이터·CPU 크게 줄임)
 function broadcast(room) {
   room.touched = Date.now();
-  for (const c of room.clients) sendTo(c, room);
+  if (room.flushTimer) return;
+  room.flushTimer = setTimeout(() => {
+    room.flushTimer = null;
+    for (const c of room.clients) sendTo(c, room);
+  }, 120);
 }
 
 /* ---------- 동작 ---------- */
@@ -301,6 +313,56 @@ function joinSeat(room, b) {
   return [200, { sid, num }];
 }
 
+/* ---------- 방 되살리기 (서버가 다시 시작됐을 때 선생님 화면의 백업으로) ---------- */
+// 백업은 누구든 보낼 수 있으니, 모든 값을 새로 검사하고 범위를 맞춰서 받음
+const int = (v, lo, hi, d) => { v = Number.isFinite(+v) ? Math.round(+v) : d; return Math.max(lo, Math.min(hi, v)); };
+const intArr = (a, n, lo, hi, d) => Array.from({ length: n }, (_, i) => int(Array.isArray(a) ? a[i] : d, lo, hi, d));
+const nullIntArr = (a, n, lo, hi) => Array.from({ length: n }, (_, i) => (Array.isArray(a) && a[i] != null && Number.isFinite(+a[i]) ? int(a[i], lo, hi, lo) : null));
+const boolArr = (a, n, d) => Array.from({ length: n }, (_, i) => (Array.isArray(a) && typeof a[i] === 'boolean' ? a[i] : d));
+const idxList = (a, n) => (Array.isArray(a) ? [...new Set(a.map(Number).filter(i => Number.isInteger(i) && i >= 0 && i < n))] : []);
+function restoreRoom(snap) {
+  if (!snap || typeof snap !== 'object') return [400, '백업이 올바르지 않아요.'];
+  const code = String(snap.code || ''), key = String(snap.key || ''), viewKey = String(snap.viewKey || '');
+  if (!/^\d{6}$/.test(code) || !/^[a-f0-9]{24}$/.test(key) || !/^[a-f0-9]{16}$/.test(viewKey)) return [400, '백업이 올바르지 않아요.'];
+  const ex = rooms.get(code);
+  if (ex) return keyOk(ex, key) ? [200, 'already'] : [409, '이미 다른 방이 쓰는 코드예요.'];
+  if (!makeSpace()) return [503, '지금은 방을 되살릴 수 없어요.'];
+  const st = clampSettings(snap.settings), n = st.n, G = snap.game || {};
+  const pact = clampPact(G.pact, st);
+  const hist = (Array.isArray(G.history) ? G.history : []).slice(0, st.rounds).map(h => ({
+    round: int(h.round, 1, st.rounds, 1), before: int(h.before, 0, st.cap, 0), demand: int(h.demand, 0, 9999, 0),
+    caught: int(h.caught, 0, st.cap, 0), left: int(h.left, 0, st.cap, 0), born: int(h.born, 0, st.cap, 0), after: int(h.after, 0, st.cap, 0),
+    picks: intArr(h.picks, n, 0, st.maxCatch, 0), kept: intArr(h.kept, n, 0, st.maxCatch, 0), confiscated: intArr(h.confiscated, n, 0, st.maxCatch, 0),
+    eaten: int(h.eaten, 0, 9999, 0), returned: int(h.returned, 0, 9999, 0),
+    starved: idxList(h.starved, n), violators: idxList(h.violators, n), banNext: idxList(h.banNext, n),
+  }));
+  const room = {
+    code, key, viewKey, locked: !!snap.locked, settings: st, rule: cleanMulti(snap.rule, 300), pact: clampPact(snap.pact, st),
+    seats: {}, clients: new Set(), gameNo: int(snap.gameNo, 1, 999, 1), hint: !!snap.hint, touched: Date.now(),
+    past: (Array.isArray(snap.past) ? snap.past : []).slice(-20).map(p => ({
+      no: int(p.no, 1, 999, 1), ok: !!p.ok, round: p.round == null ? null : int(p.round, 1, 20, 1), rounds: int(p.rounds, 1, 20, st.rounds),
+      total: int(p.total, 0, 99999, 0), rule: cleanMulti(p.rule, 300), pact: clampPact(p.pact, st), alive: p.alive == null ? null : int(p.alive, 0, 40, 0),
+    })),
+    phase: ['lobby', 'pick', 'result', 'end'].includes(snap.phase) ? snap.phase : 'lobby',
+    game: {
+      no: int(G.no, 1, 999, 1), round: int(G.round, 1, st.rounds, 1), fish: int(G.fish, 0, st.cap, st.start), history: hist,
+      totals: intArr(G.totals, n, 0, 9999, 0), picks: nullIntArr(G.picks, n, 0, st.maxCatch),
+      alive: boolArr(G.alive, n, true), deadRound: nullIntArr(G.deadRound, n, 1, st.rounds),
+      strikes: intArr(G.strikes, n, 0, 99, 0), banned: boolArr(G.banned, n, false), pact,
+      status: ['play', 'collapsed', 'success'].includes(G.status) ? G.status : 'play',
+      collapseRound: G.collapseRound == null ? null : int(G.collapseRound, 1, st.rounds, 1),
+      reason: ['lake', 'starved'].includes(G.reason) ? G.reason : null,
+    },
+  };
+  const seats = snap.seats || {}, sids = snap.sids || {};
+  for (const num of st.nums) {
+    const sid = String(sids[num] || '');
+    if (/^[a-f0-9]{24}$/.test(sid)) room.seats[num] = { nick: cleanText(seats[num] && seats[num].nick, 10), sid };
+  }
+  rooms.set(code, room);
+  return [200, 'restored'];
+}
+
 /* ---------- QR (외부 서비스 없이 서버에서 그림) ---------- */
 function qrSVG(text) {
   const qr = new QRCode(-1, QRErrorCorrectLevel.M);
@@ -315,12 +377,13 @@ function qrSVG(text) {
 /* ---------- 보안: 접속 횟수 제한 · 키 확인 · 입력 정리 ---------- */
 // 한 반(23명)이 학교의 같은 공인 IP로 들어오는 것을 생각해 넉넉하게 잡음
 const LIMITS = {
-  room: [30, 60 * 60e3],    // 방 만들기: 1시간에 30번
-  join: [300, 10 * 60e3],   // 들어가기
-  pick: [4000, 10 * 60e3],  // 고르기
-  info: [800, 10 * 60e3],   // 방 정보
-  events: [800, 10 * 60e3], // 실시간 연결
-  teacher: [3000, 10 * 60e3],
+  // 한 학교 여러 반(150명 넘게)이 같은 공인 IP로 동시에 해도 넉넉하게
+  room: [60, 60 * 60e3],     // 방 만들기·되살리기: 1시간에 60번
+  join: [2000, 10 * 60e3],   // 들어가기
+  pick: [30000, 10 * 60e3],  // 고르기
+  info: [5000, 10 * 60e3],   // 방 정보
+  events: [6000, 10 * 60e3], // 실시간 연결 (다시 연결 포함)
+  teacher: [10000, 10 * 60e3],
 };
 // 없는 방 코드를 '서로 다른 코드로' 여러 번 넣으면 잠시 막음 (코드 맞히기 막기).
 // 서버가 다시 시작되어 반 전체가 같은 옛 코드로 404를 받는 경우는 코드가 1개라 막히지 않음
@@ -389,6 +452,16 @@ function readBody(req) {
     req.on('close', () => finish({}));
   });
 }
+function readBodyBig(req) {
+  return new Promise(resolve => {
+    let d = '', big = false, done = false;
+    const finish = v => { if (!done) { done = true; resolve(v); } };
+    req.on('data', ch => { if (big) return; d += ch; if (d.length > 400000) { big = true; d = ''; finish({}); } });
+    req.on('end', () => { if (big) return; try { finish(JSON.parse(d || '{}')); } catch (e) { finish({}); } });
+    req.on('error', () => finish({}));
+    req.on('close', () => finish({}));
+  });
+}
 function serveStatic(req, res, pathname) {
   if (pathname === '/') pathname = '/index.html';
   if (pathname === '/s' || pathname === '/s/') pathname = '/s.html';
@@ -430,6 +503,13 @@ const server = http.createServer({ headersTimeout: 10e3, requestTimeout: 15e3, c
       const b = await readBody(req);
       const room = createRoom(b.settings);
       return json(res, 200, { code: room.code, key: room.key });
+    }
+    if (p === '/api/restore' && req.method === 'POST') {
+      if (overLimit(req, 'room')) return tooMany();
+      const b = await readBodyBig(req);
+      const [st, msg] = restoreRoom(b.snap);
+      if (st === 200) console.log('room restored', msg);
+      return json(res, st, { ok: st === 200, msg });
     }
     if (p === '/api/check') {
       const room = rooms.get(q.get('c'));
@@ -505,7 +585,8 @@ const server = http.createServer({ headersTimeout: 10e3, requestTimeout: 15e3, c
       res.write('retry: 2000\n\n');
       const c = { res, role, sid };
       room.clients.add(c);
-      if (role === 's') broadcast(room); else sendTo(c, room);
+      sendTo(c, room);
+      if (role === 's') broadcast(room);
       const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) { /* noop */ } }, 20000);
       req.on('close', () => {
         clearInterval(ping);

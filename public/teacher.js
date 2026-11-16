@@ -5,7 +5,7 @@ const app=document.getElementById('app'),modal=document.getElementById('modal');
 let L=TV?{}:loadLocal();
 L.settings={...DEF,...(L.settings||{})};
 if(L.hide==null)L.hide=false;
-let V=null,es=null,lastKey='',connected=false,gone=false,rosterDraft=null;
+let V=null,es=null,lastKey='',connected=false,gone=false,rosterDraft=null,lostSince=0;
 const rosterTarget=()=>rosterDraft||L.settings;
 
 function loadLocal(){try{return JSON.parse(localStorage.getItem('fish-teacher'))||{}}catch(e){return{}}}
@@ -30,24 +30,42 @@ const aliveCount=()=>V.game.alive?V.game.alive.filter(Boolean).length:V.settings
 async function boot(){
   if(TV){const qs=new URLSearchParams(location.search),c=qs.get('c'),v=qs.get('v');if(c&&/^\d{6}$/.test(c)&&v&&/^[a-f0-9]{16}$/.test(v)){L.auth={code:c,view:v};connect()}else renderTVCode();return}
   if(L.auth){
-    try{const r=await fetch(`/api/check?c=${L.auth.code}&key=${L.auth.key}`);if(r.ok){connect();return}}catch(e){}
+    try{const r=await fetch(`/api/check?c=${L.auth.code}&key=${L.auth.key}`);if(r.ok){connect();return}
+      if(r.status===404&&await tryRestore()){connect();return}}catch(e){connect();return}
     L.auth=null;saveLocal();
   }
   renderIntro();
 }
+/* 서버가 다시 시작되면(무료 서버는 가끔 그래요) 이 기기에 저장해 둔 백업으로 방을 그대로 되살림 */
+let backupTimer=null;
+function saveBackup(){if(TV||!V)return;clearTimeout(backupTimer);backupTimer=setTimeout(()=>{
+  try{localStorage.setItem('fish-backup',JSON.stringify({code:V.code,key:L.auth.key,viewKey:V.viewKey,gameNo:V.gameNo,settings:V.settings,phase:V.phase,rule:V.rule,pact:V.pact,hint:V.hint,locked:V.locked,seats:V.seats,sids:V.sids,game:V.game,past:V.past,at:Date.now()}))}catch(e){}},400)}
+async function tryRestore(){if(TV||!L.auth)return false;let b;try{b=JSON.parse(localStorage.getItem('fish-backup'))}catch(e){}
+  if(!b||b.code!==L.auth.code||b.key!==L.auth.key||Date.now()-b.at>8*3600e3)return false;
+  const r=await post('/api/restore',{snap:b});if(r.ok){toast('서버가 다시 시작되어서, 저장해 둔 기록으로 방을 되살렸어요.');return true}return false}
+// 무료 서버가 잠들지 않게 4분마다 살짝 두드림
+if(!TV)setInterval(()=>{if(L.auth)fetch('/healthz').catch(()=>{})},4*60e3);
 function connect(){
   if(es)es.close();
   gone=false;
   es=new EventSource(TV?`/api/events?c=${L.auth.code}&role=d&v=${L.auth.view}`:`/api/events?c=${L.auth.code}&role=t&key=${L.auth.key}`);
-  es.onmessage=ev=>{connected=true;V=JSON.parse(ev.data);update()};
+  es.onmessage=ev=>{connected=true;V=JSON.parse(ev.data);saveBackup();update()};
   es.onerror=async()=>{connected=false;setConn();
-    try{if(TV){const r=await fetch(`/api/info?c=${L.auth.code}`);if(r.status===404){es.close();V=null;renderTVCode('방이 사라졌어요. 선생님 화면에서 새 방을 만든 뒤, 새 코드를 넣어 주세요.')}return}
+    // 서버가 다시 시작되면 실시간 연결이 아예 닫힘 → 몇 초 뒤 직접 다시 연결
+    const retry=()=>{if(es&&es.readyState===2)setTimeout(connect,3000)};
+    try{if(TV){const r=await fetch(`/api/info?c=${L.auth.code}`);
+        if(r.status===404){lostSince=lostSince||Date.now();if(Date.now()-lostSince>5*60e3){es.close();V=null;renderTVCode('방이 사라졌어요. 선생님 화면의 📺 버튼으로 다시 열어 주세요.');return}}else lostSince=0;
+        retry();return}
       const r=await fetch(`/api/check?c=${L.auth.code}&key=${L.auth.key}`);
-      if(r.status===404){es.close();gone=true;L.auth=null;saveLocal();V=null;renderIntro('서버가 다시 시작되어 방이 사라졌어요. 새 방을 만들어 주세요. (학생들도 새 코드로 다시 들어와야 해요)')}}catch(e){}};
+      if(r.status===404){if(await tryRestore()){connect();return}
+        es.close();gone=true;L.auth=null;saveLocal();V=null;renderIntro('서버가 다시 시작되어 방이 사라졌어요. 새 방을 만들어 주세요. (학생들도 새 코드로 다시 들어와야 해요)');return}
+      retry()}catch(e){retry()}};
 }
 function setConn(){const el=document.getElementById('conn');if(el){el.className='conn'+(connected?'':' off');el.lastChild.textContent=connected?' 연결됨':' 다시 연결 중…'}}
 async function act(action,extra){if(!L.auth||TV)return;const r=await post('/api/teacher',{c:L.auth.code,key:L.auth.key,action,...(extra||{})});
-  if(!r.ok&&r.status===404){renderIntro('방을 찾을 수 없어요. 새 방을 만들어 주세요.')}}
+  if(r.ok)return;
+  if(r.status===404){if(await tryRestore()){connect();toast('다시 한 번 눌러 주세요.');return}renderIntro('방을 찾을 수 없어요. 새 방을 만들어 주세요.');return}
+  toast(r.data.error||'잘 안 됐어요. 다시 눌러 주세요.',true)}
 
 function update(){
   const g=V.game,key=[V.phase,g.no,g.round,g.status,V.hint,V.locked,V.settings.n,V.settings.maxNum].join('|');
@@ -326,7 +344,7 @@ document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-ac
     case 'create':{b.disabled=true;const r=await post('/api/room',{settings:L.settings});
       if(r.ok){L.auth={code:r.data.code,key:r.data.key};L.ruleDraft=null;saveLocal();connect()}else{b.disabled=false;renderIntro('방을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.')}break}
     case 'resetSettings':L.settings={...DEF};saveLocal();renderIntro();break;
-    case 'leave':confirmBox('이 방에서 나갈까요?<br><span class="muted">학생들의 연결도 더 이상 쓰지 않게 돼요.</span>',()=>{if(es)es.close();L.auth=null;saveLocal();renderIntro()});break;
+    case 'leave':confirmBox('이 방에서 나갈까요?<br><span class="muted">학생들의 연결도 더 이상 쓰지 않게 돼요.</span>',()=>{if(es)es.close();L.auth=null;saveLocal();try{localStorage.removeItem('fish-backup')}catch(e){}renderIntro()});break;
     case 'qr':qrModal();break;
     case 'open':act('open');break;
     case 'kick':act('kick',{num:+b.dataset.num});break;

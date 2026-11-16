@@ -88,9 +88,21 @@ const s1 = await post('/api/join', { c: code, num: 1, nick: '정상학생' }, S_
 // 14. QR 생성기 악용
 { const r = await get('/api/qr?t=' + encodeURIComponent('https://evil.example/phish'), freshIp());
   ok('QR 만들기를 피싱 주소에 악용', r.status === 400, `${r.status}`); }
-// 15. 방 만들기 폭탄
-{ const ip = freshIp(); let last; for (let i = 0; i < 35; i++) last = await post('/api/room', {}, ip);
-  ok('한 기기에서 방 35개 만들기', last.s === 429, `35번째 ${last.s}`); }
+// 15. 방 만들기 폭탄 (한 학교 여러 반을 생각해 1시간 60개까지)
+{ const ip = freshIp(); let last; for (let i = 0; i < 70; i++) last = await post('/api/room', {}, ip);
+  ok('한 기기에서 방 70개 만들기', last.s === 429, `70번째 ${last.s}`); }
+// 15-b. '방 되살리기' 악용: 남의 방 덮어쓰기, 엉뚱한 값 넣기
+{ const ip = freshIp();
+  const a = await post('/api/restore', { snap: { code, key: 'a'.repeat(24), viewKey: 'b'.repeat(16), settings: {}, game: {} } }, ip);
+  const evilCode = '123456';
+  const b = await post('/api/restore', { snap: { code: evilCode, key: 'c'.repeat(24), viewKey: 'd'.repeat(16), settings: { maxNum: 9999 }, rule: '<script>x</script>',
+    seats: { 1: { nick: '<img onerror=1>' } }, sids: { 1: 'e'.repeat(24) }, phase: 'hack',
+    game: { fish: 999999, round: 500, totals: [1e12, -5, 'x'], status: 'win', history: [{ picks: [99], starved: [999, -1] }] } } }, ip);
+  const v = await sseFirst(`/api/events?c=${evilCode}&role=t&key=${'c'.repeat(24)}`, ip); v.req && v.req.destroy();
+  const g = v.data && v.data.game, st = v.data && v.data.settings;
+  ok('방 되살리기로 남의 방 덮어쓰기', a.s === 409, `${a.s}`);
+  ok('방 되살리기에 터무니없는 값·스크립트 넣기', b.s === 200 && g.fish <= st.cap && g.round <= st.rounds && g.totals[0] <= 9999 && g.totals[1] >= 0 && g.status === 'play' && v.data.phase === 'lobby' && !/[<>]/.test(v.data.rule + v.data.seats[1].nick) && g.history[0].starved.length === 0,
+    `물고기 ${g.fish}, 라운드 ${g.round}, 상태 ${g.status}, 별명 "${v.data.seats[1].nick}"`); }
 // 16. slowloris (머리글을 아주 느리게 보내기)
 { const closed = await new Promise(res => { const s = net.connect(+new URL(B).port || 80, new URL(B).hostname, () => { s.write('GET / HTTP/1.1\r\nHost: x\r\n'); }); const t = setTimeout(() => { s.destroy(); res(false); }, 20000); s.resume(); s.on('close', () => { clearTimeout(t); res(true); }); s.on('error', () => {}); });
   ok('머리글을 끝내지 않고 연결 붙잡기 (slowloris)', closed, closed ? '10초 안에 서버가 끊음' : '20초 넘게 붙잡힘'); }

@@ -45,15 +45,20 @@ async function join(){if(sending)return;sending=true;
   me={code:form.code,sid:r.data.sid,num:r.data.num};saveMe();history.replaceState(null,'','/s?c='+form.code);connect()}
 
 /* ---------- 연결 ---------- */
-function connect(){if(es)es.close();lastKey='';lastFish=null;
-  app.innerHTML=`<div class="waitbox"><div class="e">🐟</div><h2>마을로 가는 중…</h2></div>`;
+function connect(quiet){if(es)es.close();
+  if(!quiet||!V){lastKey='';lastFish=null;app.innerHTML=`<div class="waitbox"><div class="e">🐟</div><h2>마을로 가는 중…</h2></div>`}
   es=new EventSource(`/api/events?c=${me.code}&role=s&sid=${me.sid}`);
-  es.onmessage=ev=>{V=JSON.parse(ev.data);
+  es.onmessage=ev=>{V=JSON.parse(ev.data);lostSince=0;
     if(V.kicked){leave('선생님이 자리를 비웠어요. 번호를 다시 골라 주세요.');return}
     setConn(true);render()};
   es.onerror=async()=>{setConn(false);
-    try{const r=await fetch('/api/info?c='+me.code);if(r.status===404)leave('방이 사라졌어요. 선생님이 알려 주는 새 코드로 다시 들어와 주세요.')}catch(e){}};
+    // 서버가 잠깐 다시 시작돼도 선생님 화면이 방을 되살릴 수 있어서, 5분 동안은 기다리며 다시 연결
+    const retry=()=>{if(es&&es.readyState===2)setTimeout(()=>{if(me)connect(true)},3000)};
+    try{const r=await fetch('/api/info?c='+me.code);
+      if(r.status===404){lostSince=lostSince||Date.now();if(Date.now()-lostSince>5*60e3){leave('방이 사라졌어요. 선생님이 알려 주는 새 코드로 다시 들어와 주세요.');return}}else lostSince=0;
+      retry()}catch(e){retry()}};
 }
+let lostSince=0;
 function leave(msg){if(es)es.close();const code=me&&me.code;me=null;saveMe();V=null;form={code:code||'',num:null,nick:''};
   if(msg&&msg.startsWith('방이'))form.code='';
   info=null;if(form.code)loadInfo().then(()=>{});renderJoin(msg)}
@@ -65,7 +70,7 @@ function render(){const st=V.settings,key=[V.phase,V.gameNo,V.round,V.status].jo
     lastKey=key;lastFish=null;
     app.innerHTML=`
     <div class="mehead"><div class="who">${V.num}번${V.nick?' '+esc(V.nick):''}</div><div class="mine">내 물고기 🐟 <span id="myTotal">${V.myTotal}</span></div></div>
-    <div id="conn" class="err" style="display:none;margin:0 0 10px">연결이 끊겼어요. 다시 연결하는 중…</div>
+    <div id="conn" class="err" style="display:none;margin:0 0 10px">연결이 잠깐 끊겼어요. 다시 연결하는 중… (화면을 닫지 말고 기다려 주세요)</div>
     ${pactBar(V.pact,V.rule)}
     <div class="card"><div id="lakeBox"></div>
       <div class="fishcount" style="margin-top:14px"><div><div class="lbl">호수의 물고기</div><div class="n" style="font-size:42px">${V.fish}<small> / ${st.cap}마리</small></div></div>
@@ -138,7 +143,10 @@ document.addEventListener('click',async ev=>{
   const p=ev.target.closest('[data-pick]');
   if(p&&V&&V.phase==='pick'){const v=+p.dataset.pick;V.myPick=v;render();
     const r=await post('/api/pick',{c:me.code,sid:me.sid,v});
-    if(!r.ok&&r.data.error==='kicked')leave('선생님이 자리를 비웠어요. 번호를 다시 골라 주세요.');return}
+    if(r.ok)return;
+    if(r.data.error==='kicked'){leave('선생님이 자리를 비웠어요. 번호를 다시 골라 주세요.');return}
+    // 전송이 안 됐으면 '낸 것처럼' 보이지 않게 되돌리고 알려 줌
+    V.myPick=null;render();toast(r.data.error||'전송이 안 됐어요. 다시 눌러 주세요.',true);return}
   const a=ev.target.closest('[data-act]');if(!a)return;
   if(a.dataset.act==='join')join();
   if(a.dataset.act==='out'){if(es)es.close();const code=me.code;form={code,num:null,nick:'',oldCode:code,oldSid:me.sid,oldNum:me.num};me=null;saveMe();loadInfo()}
