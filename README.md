@@ -62,5 +62,5 @@
 로컬에서 `PORT=3123 node server.js`를 켠 뒤 `node tools/security-check.mjs`로 실행해요. 실제 수업 서버에는 돌리지 마세요.
 
 ## 그림 출처
-- 배지·아이콘·썸네일의 배지 그림: Google Gemini로 생성한 이미지 (`public/img/`)
+- 배지·아이콘·썸네일 그림: Google Gemini로 생성한 이미지 (`public/img/`)
 - QR 코드: `vendor/QRCode` (Apache-2.0)

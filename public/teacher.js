@@ -136,7 +136,7 @@ function renderIntro(notice){
   </div>
   <div class="card" style="margin-top:16px" id="rosterCard">${rosterHTML(st)}</div>
   <div class="startrow"><button class="btn big primary" data-act="create">🎣 방 만들기</button></div>
-  <p class="credit">배지·아이콘: Google Gemini로 생성한 이미지</p>`;
+  <p class="credit">배지·아이콘·썸네일: Google Gemini로 생성한 이미지</p>`;
 }
 
 function renderTVCode(notice){V=null;lastKey='';
