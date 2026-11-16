@@ -214,3 +214,8 @@ details.settings summary::before{content:'⚙️ '}
 .ministeps{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}
 .ministeps .step{opacity:1;animation:none;padding:10px 6px}
 .ministeps .step .v{font-size:30px}
+.st.dead{background:#f3f4f7;border-color:#dfe3ea;opacity:.75}
+.st.dead .deadmsg{text-align:center;font-family:'Jua';font-size:16px;color:#8a93a6;padding:6px 0}
+.rules{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.r5{background:#f1ebff}
+.steps{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}

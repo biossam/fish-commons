@@ -78,16 +78,23 @@ function render(){const st=V.settings,key=[V.phase,V.gameNo,V.round,V.status].jo
   document.getElementById('myTotal').textContent=V.myTotal;
   const main=document.getElementById('main');
   if(V.phase==='lobby')main.innerHTML=`<div class="waitbox"><div class="e">🎣</div><h2>들어왔어요!</h2><p>선생님이 시작할 때까지 기다려요.</p><p>지금 <b>${V.joined}명</b>이 마을에 있어요.</p></div>`;
+  else if(V.alive===false&&V.phase!=='end')main.innerHTML=outHTML();
   else if(V.phase==='pick')main.innerHTML=pickHTML();
   else if(V.phase==='result')main.innerHTML=resultHTML(true);
   else main.innerHTML=endHTML();
 }
-function pickHTML(){const st=V.settings;let b='';
-  for(let v=0;v<=st.maxCatch;v++)b+=`<button class="${V.myPick===v?'sel':''}" data-pick="${v}">${v}마리 ${v===0?'<small>쉬기</small>':''}</button>`;
+function outHTML(){const last=V.history[V.history.length-1];
+  return `<div class="waitbox"><div class="e">😵</div><h2>탈락했어요</h2>
+    <p>${V.deadRound}라운드가 끝나고 먹고 나니 내 물고기가 <b>0마리</b>가 되었어요.<br>다음 라운드에는 나갈 수 없어요.</p>
+    <p>친구들이 호수를 끝까지 지킬 수 있을지 TV를 보며 응원해요.</p></div>
+  ${V.phase==='result'&&last?resultHTML(false):''}`}
+function pickHTML(){const st=V.settings,eat=st.eat||0;let b='';
+  for(let v=0;v<=st.maxCatch;v++){const after=V.myTotal+v-eat,out=eat>0&&after<=0;
+    b+=`<button class="${V.myPick===v?'sel':''}" data-pick="${v}">${v}마리 ${eat>0?`<small>${out?'→ 0마리, 탈락!':`→ 먹고 ${after}마리`}</small>`:v===0?'<small>쉬기</small>':''}</button>`}
   return `<h2 style="font-size:24px">🎣 ${V.round}라운드: 몇 마리 잡을까요?</h2>
-  <p class="muted" style="margin:6px 0 0">친구에게 보여 주지 말고 몰래 골라요.</p>
+  <p class="muted" style="margin:6px 0 0">친구에게 보여 주지 말고 몰래 골라요.${st.eat>0?`<br>라운드가 끝나면 <b>${st.eat}마리</b>를 먹어요. 먹고 나서 <b>0마리</b>면 탈락!`:''}</p>
   <div class="bigpick">${b}</div>
-  <div class="msg ${V.myPick!=null?'good':'warn'}" style="margin-top:14px;font-size:16px">${V.myPick!=null?`<b>${V.myPick}마리</b>로 냈어요! 결과가 나오기 전까지는 바꿀 수 있어요.`:'아직 고르지 않았어요.'}<br><span class="muted">우리 반 ${V.submitted} / ${V.settings.n}명 냈어요</span></div>`}
+  <div class="msg ${V.myPick!=null?'good':'warn'}" style="margin-top:14px;font-size:16px">${V.myPick!=null?`<b>${V.myPick}마리</b>로 냈어요! 결과가 나오기 전까지는 바꿀 수 있어요.`:'아직 고르지 않았어요.'}<br><span class="muted">우리 반 ${V.submitted} / ${V.aliveCount}명 냈어요</span></div>`}
 function resultHTML(waiting){const st=V.settings,e=V.history[V.history.length-1];if(!e)return '';const m=roundMsg(e,V.status,st);
   return `<h2 style="font-size:24px">${e.round}라운드 결과</h2>
   <div class="ministeps">
@@ -96,12 +103,14 @@ function resultHTML(waiting){const st=V.settings,e=V.history[V.history.length-1]
     <div class="step" style="background:#e6f4ff"><div class="v">${e.after}</div><div class="l">지금 호수 물고기</div></div>
     <div class="step" style="background:var(--yellow2)"><div class="v">${e.mine==null?0:e.mine}</div><div class="l">내가 잡으려 한 물고기</div></div>
   </div>
+  ${st.eat>0&&V.status!=='collapsed'&&(V.alive||e.meStarved)?`<div class="msg ${e.meStarved?'bad':'good'}" style="font-size:16px;margin-bottom:10px">🍚 살기 위해 ${st.eat}마리를 먹었어요. ${e.meStarved?'내 물고기가 <b>0마리</b>! 탈락이에요. 😵':`내 물고기는 <b>${V.myTotal}마리</b> 남았어요.`}</div>`:''}
+  ${e.starvedCount&&!e.meStarved?`<div class="msg warn" style="font-size:16px;margin-bottom:10px">😵 이번 라운드에 <b>${e.starvedCount}명</b>이 탈락했어요.</div>`:''}
   <div class="msg ${m.cls}" style="font-size:16px">${m.msg}</div>
   ${waiting&&V.status==='play'?`<p class="muted" style="text-align:center;margin-top:12px">선생님이 다음 라운드를 열 때까지 기다려요.</p>`:''}`}
 function endHTML(){const st=V.settings,ok=V.status==='success';
   return `<div class="waitbox"><div class="e">${ok?'🎉':'😵'}</div>
-    <h2>${ok?`${st.rounds}라운드까지 살아남았어요!`:'호수가 텅 비었어요…'}</h2>
-    ${ok?`<p>내 점수는 <b style="font-size:26px;color:var(--coral)">${V.myTotal}마리</b>예요.</p>`
+    <h2>${ok?(V.alive?`${st.rounds}라운드까지 살아남았어요!`:'호수는 지켰지만 나는 탈락했어요'):V.reason==='starved'?'모두 탈락했어요…':'호수가 텅 비었어요…'}</h2>
+    ${ok&&!V.alive?`<p>${V.deadRound}라운드에 물고기가 0마리가 되어 탈락했어요.</p>`:ok?`<p>내 점수는 <b style="font-size:26px;color:var(--coral)">${V.myTotal}마리</b>예요.</p>`
         :`<p>마을 모두의 수명이 아웃!<br>내가 모은 물고기 <s>${V.myTotal}마리</s>도 모두 사라졌어요.</p>`}
     <p>TV 화면을 보며 함께 이야기해 봐요.</p></div>
   <div class="chartwrap">${chartHTML(V.history,V.fish,st)}</div>`}

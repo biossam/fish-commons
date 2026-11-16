@@ -1,6 +1,6 @@
 /* 선생님 조작 화면(/)과 TV 화면(/tv)이 함께 쓰는 코드. TV 화면은 window.TV_MODE = true */
 const TV=!!window.TV_MODE;
-const DEF={maxNum:24,skip:'16',start:100,cap:100,growth:50,maxCatch:3,rounds:10};
+const DEF={maxNum:24,skip:'16',start:100,cap:100,growth:50,maxCatch:3,rounds:10,eat:1};
 const app=document.getElementById('app'),modal=document.getElementById('modal');
 let L=TV?{}:loadLocal();
 L.settings={...DEF,...(L.settings||{})};
@@ -13,6 +13,8 @@ function tvURL(){return location.origin+'/tv?c='+V.code}
 function joinURL(){return location.origin+'/s'}
 function numsOf(st){const skip=new Set((String(st.skip).match(/\d+/g)||[]).map(Number));const a=[];for(let i=1;i<=st.maxNum;i++)if(!skip.has(i))a.push(i);return a}
 function label(i){const num=V.settings.nums[i],s=V.seats[num];return s&&s.nick?`${num}번 ${s.nick}`:`${num}번`}
+const isAlive=i=>!V.game.alive||V.game.alive[i];
+const aliveCount=()=>V.game.alive?V.game.alive.filter(Boolean).length:V.settings.n;
 
 /* ---------- 연결 ---------- */
 async function boot(){
@@ -90,7 +92,8 @@ function renderIntro(notice){
     <div class="rule r1"><span class="num">규칙 1</span><h3>몰래 정해요</h3>라운드마다 내 기기에서 물고기를 <b>0~${st.maxCatch}마리</b> 중에 몇 마리 잡을지 몰래 골라요.</div>
     <div class="rule r2"><span class="num">규칙 2</span><h3>물고기가 늘어나요</h3>잡고 남은 물고기의 <b>${st.growth}%</b>만큼 새끼가 태어나요. 단, 호수에는 최대 <b>${st.cap}마리</b>까지만 살 수 있어요.</div>
     <div class="rule r3"><span class="num">규칙 3</span><h3>텅 비면 모두 아웃</h3>잡으려는 물고기가 호수의 물고기보다 많아 <b>호수가 텅 비면</b> 마을 모두의 수명 아웃! 잡아 둔 물고기도 모두 사라져요.</div>
-    <div class="rule r4"><span class="num">규칙 4</span><h3>끝까지 살아남기</h3><b>${st.rounds}라운드</b>까지 호수를 지키면, 그동안 잡은 물고기가 내 점수가 돼요.</div>
+    ${st.eat>0?`<div class="rule r5"><span class="num">규칙 4</span><h3>먹고 살아요</h3>라운드가 끝날 때마다 살기 위해 내 물고기 <b>${st.eat}마리</b>를 먹어요. 먹고 나서 내 물고기가 <b>0마리</b>면 탈락! 다음 라운드에 나갈 수 없어요.</div>`:''}
+    <div class="rule r4"><span class="num">규칙 ${st.eat>0?5:4}</span><h3>끝까지 살아남기</h3><b>${st.rounds}라운드</b>까지 호수를 지키면, 그동안 잡은 물고기가 내 점수가 돼요.</div>
   </div>
   <div class="introgrid">
     <div class="card tips"><h3>🧑‍🏫 진행 방법</h3><ol>
@@ -111,6 +114,7 @@ function renderIntro(notice){
         <label>처음 물고기 수<input type="number" min="5" max="300" data-set="start" value="${st.start}"></label>
         <label>호수 최대 물고기 수<input type="number" min="10" max="300" data-set="cap" value="${st.cap}"></label>
         <label>번식률 (남은 물고기의 %)<input type="number" min="0" max="100" data-set="growth" value="${st.growth}"></label>
+        <label>라운드마다 먹는 물고기 (0이면 끔)<input type="number" min="0" max="3" data-set="eat" value="${st.eat}"></label>
       </div>
       <p class="muted">호수가 가득 찼을 때 반 전체가 한 라운드에 <b>${safeCatch(sim,st.cap)}마리</b>까지 잡아야 호수가 줄지 않아요. (모두 1마리씩이면 ${n}마리, 모두 2마리씩이면 ${n*2}마리) <button class="btn small" data-act="resetSettings">기본값으로</button></p>
       </details>
@@ -169,12 +173,12 @@ function renderPlay(){const g=V.game,st=V.settings,pct=g.fish/st.cap,safe=safeCa
         <div style="text-align:right"><div class="lbl">라운드</div><div class="jua" style="font-size:34px">${g.round} <small style="font-size:18px;color:var(--sub)">/ ${st.rounds}</small></div></div></div>
       <div class="health"><i style="width:${pct*100}%;background:${healthColor(pct)}"></i></div>
       ${TV?'':`<div style="margin-top:12px"><button class="btn small ${V.hint?'on':''}" data-act="hint">💡 호수 지킴 힌트 ${V.hint?'숨기기 (TV에서도 사라져요)':'TV에 보여 주기'}</button></div>`}
-      ${V.hint?`<div class="hintbox">호수를 지금처럼 <b>${g.fish}마리</b>로 지키려면, 이번 라운드에 반 전체가 <b>${safe}마리</b>까지만 잡아야 해요.<br>${st.n}명이 나누면 1인당 약 <b>${(safe/st.n).toFixed(1)}마리</b>예요.</div>`:''}
+      ${V.hint?`<div class="hintbox">호수를 지금처럼 <b>${g.fish}마리</b>로 지키려면, 이번 라운드에 반 전체가 <b>${safe}마리</b>까지만 잡아야 해요.<br>${aliveCount()}명이 나누면 1인당 약 <b>${(safe/aliveCount()).toFixed(1)}마리</b>예요.${st.eat>0?`<br>그런데 한 사람이 라운드마다 <b>${st.eat}마리</b>를 먹고도 <b>1마리 이상</b> 남아 있어야 탈락하지 않아요.`:''}</div>`:''}
       <div class="chartwrap"><h3>📈 호수 기록</h3>${chartHTML(g.history,g.fish,st)}</div>
     </section>
     <section class="card ${TV||L.hide?'hidemode':''}">
       <div class="rhead"><h2>🎣 ${g.round}라운드: ${picking?'몰래 고르는 중…':'결과 발표'}</h2>
-        <span class="pill">제출 <b id="cntDone">0</b> / ${st.n}명</span>
+        <span class="pill">제출 <b id="cntDone">0</b> / <span id="cntAlive">${aliveCount()}</span>명</span>
         <span class="pill">잡으려는 물고기 합계 <b id="cntSum">0</b></span></div>
       ${TV?'':`<div class="tools">
         <button class="btn small ${L.hide?'on':''}" data-act="hide">👀 ${L.hide?'선택 가리는 중':'선택 보이는 중'}</button>
@@ -189,17 +193,19 @@ function renderPlay(){const g=V.game,st=V.settings,pct=g.fish/st.cap,safe=safeCa
 }
 function renderGrid(){const box=document.getElementById('grid');if(!box)return;const g=V.game,st=V.settings;let h='';
   st.nums.forEach((num,i)=>{const p=g.picks[i],s=V.seats[num];let b='';
+    if(!isAlive(i)){h+=`<div class="st dead"><div class="nm"><b title="${esc(label(i))}">${esc(label(i))}</b><span>😵</span></div><div class="dev">${g.deadRound[i]}라운드에 탈락</div><div class="deadmsg">물고기 0마리 😵</div></div>`;return}
     if(TV)b=`<div class="muted" style="text-align:center;padding:6px 0;font-size:15px">${p!=null?'<b style="color:#2a86c4">제출했어요 ✓</b>':'고르는 중…'}</div>`;
     else for(let v=0;v<=st.maxCatch;v++)b+=`<button class="${p===v?'sel c'+v:''}" data-act="set" data-i="${i}" data-v="${v}">${v}</button>`;
     const dev=s?`<span class="dot ${s.online?'':'away'}"></span>${s.online?'기기로 참여':'기기 연결 끊김'}`:(TV?'아직 안 들어옴':'선생님이 입력');
     h+=`<div class="st ${p!=null?'done':''} ${s?'byDevice':''}"><div class="chk">✓</div><div class="nm"><b title="${esc(label(i))}">${esc(label(i))}</b><span>모은 🐟 ${g.totals[i]}</span></div><div class="dev">${dev}</div>${TV?b:`<div class="opts">${b}</div>`}</div>`});
   box.innerHTML=h;
-  document.getElementById('cntDone').textContent=g.picks.filter(p=>p!=null).length;
+  document.getElementById('cntDone').textContent=g.picks.filter((p,i)=>p!=null&&isAlive(i)).length;
+  const ca=document.getElementById('cntAlive');if(ca)ca.textContent=aliveCount();
   document.getElementById('cntSum').textContent=TV||L.hide?'?':sum(g.picks);
   const w=document.getElementById('warnBox');if(w)w.innerHTML='';
 }
-function tryResolve(force){const g=V.game,missing=g.picks.filter(p=>p==null).length;
-  if(missing&&!force){const who=V.settings.nums.filter((n,i)=>g.picks[i]==null).map(n=>n+'번').join(', ');
+function tryResolve(force){const g=V.game,missing=g.picks.filter((p,i)=>p==null&&isAlive(i)).length;
+  if(missing&&!force){const who=V.settings.nums.filter((n,i)=>g.picks[i]==null&&isAlive(i)).map(n=>n+'번').join(', ');
     document.getElementById('warnBox').innerHTML=`<div class="warn">아직 안 낸 친구 <b>${missing}명</b>: ${esc(who)} <button class="btn small" data-act="resolveForce">0마리로 하고 진행</button></div>`;return}
   if(missing)act('fillEmpty',{v:0}).then(()=>act('resolve'));else act('resolve')}
 
@@ -211,29 +217,32 @@ function showRoundModal(){const g=V.game,st=V.settings,e=g.history[g.history.len
       <div class="step" style="background:#e6f4ff;animation-delay:.05s"><div class="e">🐟</div><div class="v">${e.before}</div><div class="l">처음 호수 물고기</div></div>
       <div class="step" style="background:var(--coral2);animation-delay:.45s"><div class="e">🎣</div><div class="v">−${e.caught}</div><div class="l">우리 반이 잡은 물고기${e.demand>e.before?`<br>(잡으려던 수 ${e.demand})`:''}</div></div>
       <div class="step" style="background:var(--mint2);animation-delay:.85s"><div class="e">🥚</div><div class="v">+${e.born}</div><div class="l">남은 ${e.left}마리가 낳은 새끼</div></div>
+      ${st.eat>0&&e.eaten!=null&&g.status!=='collapsed'||e.starved&&e.starved.length?`<div class="step" style="background:#f1ebff;animation-delay:1.05s"><div class="e">🍚</div><div class="v">${e.eaten}</div><div class="l">살기 위해 먹은 물고기<br>(각자 모은 물고기에서)</div></div>`:''}
       <div class="step" style="background:var(--yellow2);animation-delay:1.25s"><div class="e">${e.after>0?'🏞️':'🏜️'}</div><div class="v">${e.after}</div><div class="l">${g.status==='play'?'다음 라운드 물고기':'라운드 후 호수'}${e.left+e.born>st.cap?`<br>(최대 ${st.cap}마리)`:''}</div></div>
     </div>
     <div class="msg ${m.cls}">${m.msg}</div>
+    ${e.starved&&e.starved.length?`<div class="msg bad" style="margin-top:10px">😵 먹고 나니 물고기가 0마리! <b>${e.starved.length}명</b>이 탈락해서 다음 라운드에 나갈 수 없어요: ${e.starved.map(i=>esc(label(i))).join(', ')}</div>`:''}
     <div style="text-align:center;margin-top:20px">${TV?`<p class="muted" style="font-size:16px">선생님이 다음으로 넘길 때까지 잠깐 이야기해 봐요.</p>`:`<button class="btn big ${g.status==='collapsed'?'primary':'blue'}" data-act="next">${nextLabel}</button>`}</div>
   </div></div>`}
 
 /* ---------- 끝 ---------- */
-function simEqual(st,k){let N=st.start;for(let r=1;r<=st.rounds;r++){const d=st.n*k;if(d>=N)return{ok:false,round:r};N=growWith(st,N-d).after}return{ok:true,per:k*st.rounds}}
-function simBest(st){let N=st.start,tot=0,first=null;const lim=st.n*st.maxCatch;for(let r=1;r<=st.rounds;r++){const c=Math.min(safeCatch(st,N),lim);if(first==null)first=c;tot+=c;N=growWith(st,N-c).after}return{tot,first}}
+function simEqual(st,k){const e=st.eat||0;let N=st.start;for(let r=1;r<=st.rounds;r++){const d=st.n*k;if(d>=N)return{ok:false,round:r,why:'lake'};if(e>0&&k<=e)return{ok:false,round:r,why:'starve'};N=growWith(st,N-d).after}return{ok:true,per:(k-e)*st.rounds}}
+function simBest(st){let N=st.start,tot=0,first=null;const lim=st.n*st.maxCatch;for(let r=1;r<=st.rounds;r++){const c=Math.min(safeCatch(st,N),lim);if(first==null)first=c;tot+=c;N=growWith(st,N-c).after}return{tot,first,per:(tot-st.n*(st.eat||0)*st.rounds)/st.n,okEat:first>=st.n*(st.eat||0)}}
 function pastHTML(){return `<ul class="past" style="padding:0;margin:6px 0 0">${V.past.map(p=>`<li>${p.no}판 · ${p.ok?`<span class="tag ok">성공</span> ${p.rounds}라운드 완주 · 반 전체 ${p.total}마리`:`<span class="tag no">호수 붕괴</span> ${p.round}라운드에서 텅 빔`}${p.rule?` · 약속: “${esc(p.rule.length>30?p.rule.slice(0,30)+'…':p.rule)}”`:''}</li>`).join('')}</ul>`}
 function renderEnd(){const g=V.game,st=V.settings,ok=g.status==='success',tot=sum(g.totals),best=simBest(st);
-  const rows=[];for(let k=1;k<=st.maxCatch;k++){const r=simEqual(st,k);rows.push(`<tr><td>모두 ${k}마리씩</td><td>${r.ok?`<span class="tag ok">${st.rounds}라운드 완주</span>`:`<span class="tag no">${r.round}라운드에 붕괴</span>`}</td><td>${r.ok?r.per+'마리':'0마리'}</td></tr>`)}
-  rows.push(`<tr><td>호수를 지키며 최대로<br><span class="muted">(매 라운드 반 전체 ${best.first}마리 정도)</span></td><td><span class="tag ok">${st.rounds}라운드 완주</span></td><td>약 ${(best.tot/st.n).toFixed(1)}마리</td></tr>`);
-  rows.push(`<tr class="us"><td>우리 반 실제 결과</td><td>${ok?`<span class="tag ok">${st.rounds}라운드 완주</span>`:`<span class="tag no">${g.collapseRound}라운드에 붕괴</span>`}</td><td>${ok?(tot/st.n).toFixed(1)+'마리 (평균)':'0마리'}</td></tr>`);
+  const rows=[];for(let k=1;k<=st.maxCatch;k++){const r=simEqual(st,k);rows.push(`<tr><td>모두 ${k}마리씩</td><td>${r.ok?`<span class="tag ok">${st.rounds}라운드 완주</span>`:r.why==='starve'?`<span class="tag no">${r.round}라운드에 모두 탈락</span>`:`<span class="tag no">${r.round}라운드에 붕괴</span>`}</td><td>${r.ok?r.per+'마리':'0마리'}</td></tr>`)}
+  rows.push(`<tr><td>호수를 지키며 최대로<br><span class="muted">(매 라운드 반 전체 ${best.first}마리 정도)</span></td><td><span class="tag ok">${st.rounds}라운드 완주</span></td><td>약 ${Math.max(0,best.per).toFixed(1)}마리</td></tr>`);
+  rows.push(`<tr class="us"><td>우리 반 실제 결과</td><td>${ok?`<span class="tag ok">${st.rounds}라운드 완주</span>`:`<span class="tag no">${g.collapseRound}라운드에 붕괴</span>`}</td><td>${ok?(aliveCount()<st.n?`살아남은 ${aliveCount()}명 평균 ${(tot/Math.max(1,aliveCount())).toFixed(1)}마리`:(tot/st.n).toFixed(1)+'마리 (평균)'):'0마리'}</td></tr>`);
   const order=g.totals.map((v,i)=>({v,i})).sort((a,b)=>b.v-a.v),mx=Math.max(1,...g.totals);
-  const rank=order.map((o,j)=>`<div class="rk ${ok?'':'lost'}"><span class="muted">${j+1}</span><span class="nm">${esc(label(o.i))}</span><span class="bar"><i style="width:${o.v/mx*100}%"></i></span><span class="v">${o.v}</span></div>`).join('');
+  const rank=order.map((o,j)=>`<div class="rk ${ok&&isAlive(o.i)?'':'lost'}"><span class="muted">${j+1}</span><span class="nm">${isAlive(o.i)?'':'😵 '}${esc(label(o.i))}</span><span class="bar"><i style="width:${o.v/mx*100}%"></i></span><span class="v">${o.v}</span></div>`).join('');
   app.innerHTML=topHTML()+ruleBar()+`
   <div class="card">
     <div class="endhead"><div class="emo">${ok?'🎉':'😵'}</div>
-      <h2>${ok?`${st.rounds}라운드까지 호수를 지켜냈어요!`:`${g.collapseRound}라운드에서 호수가 텅 비었어요…`}</h2>
-      <p>${ok?'마을 사람 모두가 끝까지 물고기를 먹으며 살아남았어요. 잡은 물고기가 모두 점수가 돼요.':'물고기가 더 이상 태어날 수 없어 마을 사람 <b>모두의 수명이 아웃</b>! 그동안 잡아 둔 물고기도 모두 사라졌어요.'}</p></div>
+      <h2>${ok?`${st.rounds}라운드까지 호수를 지켜냈어요!`:g.reason==='starved'?`${g.collapseRound}라운드에서 모두 탈락했어요…`:`${g.collapseRound}라운드에서 호수가 텅 비었어요…`}</h2>
+      <p>${ok?(aliveCount()<st.n?`호수는 지켰지만 <b>${st.n-aliveCount()}명</b>은 물고기가 0마리가 되어 탈락했어요. 살아남은 친구는 먹고 남은 물고기가 점수예요.`:'마을 사람 모두가 끝까지 물고기를 먹으며 살아남았어요. 먹고 남은 물고기가 점수예요.'):g.reason==='starved'?'호수에 물고기는 남았지만, 모두 물고기가 0마리가 되어 탈락했어요.':'물고기가 더 이상 태어날 수 없어 마을 사람 <b>모두의 수명이 아웃</b>! 그동안 잡아 둔 물고기도 모두 사라졌어요.'}</p></div>
     <div class="endstats">
-      <div class="es"><div class="v">${ok?tot:`<s style="color:#b3bccb">${tot}</s>`}</div><div class="l">${ok?'반 전체가 잡은 물고기':'잡았지만 사라진 물고기'}</div></div>
+      <div class="es"><div class="v">${ok?tot:`<s style="color:#b3bccb">${tot}</s>`}</div><div class="l">${ok?'먹고 남은 물고기 (반 전체)':'잡았지만 사라진 물고기'}</div></div>
+      ${st.eat>0?`<div class="es"><div class="v">${aliveCount()} / ${st.n}</div><div class="l">살아남은 사람</div></div>`:''}
       <div class="es"><div class="v">${ok?st.rounds:g.collapseRound-1} / ${st.rounds}</div><div class="l">무사히 끝낸 라운드</div></div>
       <div class="es"><div class="v">${g.fish}</div><div class="l">호수에 남은 물고기</div></div>
       <div class="es"><div class="v">${best.tot}</div><div class="l">호수를 지키며 잡을 수 있었던 최대</div></div>
@@ -243,7 +252,7 @@ function renderEnd(){const g=V.game,st=V.settings,ok=g.status==='success',tot=su
   <div class="endgrid">
     <div class="card cmp"><h3>🤔 이렇게 했다면?</h3><p class="muted">1인당 마지막에 가질 수 있는 물고기</p>
       <table><tr><th>방법</th><th>호수는?</th><th>1인당</th></tr>${rows.join('')}</table>
-      <p class="muted" style="margin-top:10px">욕심내서 많이 잡으면 그 순간엔 내가 더 많이 갖지만, 호수가 무너지면 모두 0마리가 돼요.</p></div>
+      <p class="muted" style="margin-top:10px">욕심내서 많이 잡으면 그 순간엔 내가 더 많이 갖지만, 호수가 무너지면 모두 0마리가 돼요.${st.eat>0?' 그렇다고 너무 적게 잡으면 먹을 물고기가 없어 내가 탈락해요. 살아남을 만큼만 잡는 게 핵심이에요.':''}</p></div>
     <div class="card"><h3>${ok?'🏅 잡은 물고기':'🫥 잡았지만 사라진 물고기'}</h3><p class="muted">${ok?'많이 잡은 친구와 적게 잡은 친구가 있다면, 그건 공평했을까요?':'가장 많이 잡은 친구도 결국 0마리가 되었어요.'}</p><div class="rank">${rank}</div></div>
   </div>
   <div class="concept"><h3>💡 공유지의 비극</h3>
@@ -305,7 +314,7 @@ document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-ac
 document.addEventListener('input',ev=>{if(ev.target.id==='ruleTxt'){L.ruleDraft=ev.target.value;saveLocal()}});
 document.addEventListener('change',ev=>{const t=ev.target;if(!t.dataset.set)return;const k=t.dataset.set,st=L.settings;
   if(k==='skip')st.skip=t.value;
-  else{const lim={maxNum:[2,40],rounds:[3,20],start:[5,300],cap:[10,300],growth:[0,100],maxCatch:[1,5]}[k];let v=parseInt(t.value,10);if(isNaN(v))v=DEF[k];st[k]=Math.max(lim[0],Math.min(lim[1],v))}
+  else{const lim={maxNum:[2,40],rounds:[3,20],start:[5,300],cap:[10,300],growth:[0,100],maxCatch:[1,5],eat:[0,3]}[k];let v=parseInt(t.value,10);if(isNaN(v))v=DEF[k];st[k]=Math.max(lim[0],Math.min(lim[1],v))}
   if(st.start>st.cap)st.start=st.cap;
   saveLocal();renderIntro();document.querySelector('details.settings').open=true});
 boot();

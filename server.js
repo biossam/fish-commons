@@ -11,8 +11,8 @@ const QRErrorCorrectLevel = require('./vendor/QRCode/QRErrorCorrectLevel');
 const PORT = process.env.PORT || 3000;
 const PUB = path.join(__dirname, 'public');
 
-const DEF = { maxNum: 24, skip: '16', start: 100, cap: 100, growth: 50, maxCatch: 3, rounds: 10 };
-const LIM = { maxNum: [2, 40], rounds: [3, 20], start: [5, 300], cap: [10, 300], growth: [0, 100], maxCatch: [1, 5] };
+const DEF = { maxNum: 24, skip: '16', start: 100, cap: 100, growth: 50, maxCatch: 3, rounds: 10, eat: 1 };
+const LIM = { maxNum: [2, 40], rounds: [3, 20], start: [5, 300], cap: [10, 300], growth: [0, 100], maxCatch: [1, 5], eat: [0, 3] };
 const rooms = new Map();
 
 /* ---------- 규칙 ---------- */
@@ -52,7 +52,8 @@ function freshGame(room) {
   room.game = {
     no: room.gameNo, round: 1, fish: st.start, history: [],
     totals: Array(st.n).fill(0), picks: Array(st.n).fill(null),
-    status: 'play', collapseRound: null,
+    alive: Array(st.n).fill(true), deadRound: Array(st.n).fill(null),
+    status: 'play', collapseRound: null, reason: null,
   };
   room.phase = 'lobby';
 }
@@ -72,15 +73,29 @@ function seatOf(room, sid) {
 }
 function resolveRound(room) {
   const g = room.game, st = room.settings;
-  const picks = g.picks.map(p => p || 0);
+  const picks = g.picks.map((p, i) => (g.alive[i] ? p || 0 : 0));
   const demand = picks.reduce((a, b) => a + b, 0);
   const before = g.fish;
   const left = Math.max(0, before - demand);
   if (demand < before) picks.forEach((p, i) => { g.totals[i] += p; });
   const { born, after } = grow(st, left);
-  g.history.push({ round: g.round, before, demand, caught: Math.min(demand, before), left, born, after, picks });
+  // 라운드가 끝나면 살아 있는 사람마다 생존 식량(eat마리)을 먹음.
+  // 먹고 나서 내 물고기가 0마리가 되면 탈락 — 다음 라운드에 나갈 수 없음
+  let eaten = 0;
+  const starved = [];
+  if (left > 0 && st.eat > 0) {
+    g.alive.forEach((on, i) => {
+      if (!on) return;
+      const ate = Math.min(st.eat, g.totals[i]);
+      g.totals[i] -= ate;
+      eaten += ate;
+      if (g.totals[i] <= 0) { g.totals[i] = 0; g.alive[i] = false; g.deadRound[i] = g.round; starved.push(i); }
+    });
+  }
+  g.history.push({ round: g.round, before, demand, caught: Math.min(demand, before), left, born, after, picks, eaten, starved });
   g.fish = after;
-  if (left <= 0) { g.status = 'collapsed'; g.collapseRound = g.round; }
+  if (left <= 0) { g.status = 'collapsed'; g.collapseRound = g.round; g.reason = 'lake'; }
+  else if (!g.alive.some(Boolean)) { g.status = 'collapsed'; g.collapseRound = g.round; g.reason = 'starved'; }
   else if (g.round >= st.rounds) g.status = 'success';
   room.phase = 'result';
 }
@@ -113,9 +128,10 @@ function studentView(room, sid) {
     role: 's', code: room.code, phase: room.phase, rule: room.rule, settings: st,
     num, nick: room.seats[num].nick, gameNo: g.no,
     round: g.round, fish: g.fish, status: g.status, collapseRound: g.collapseRound,
-    history: g.history.map(h => ({ round: h.round, before: h.before, demand: h.demand, caught: h.caught, left: h.left, born: h.born, after: h.after, mine: h.picks[i] })),
-    myPick: g.picks[i], myTotal: g.totals[i],
-    submitted: g.picks.filter(p => p != null).length, joined: Object.keys(room.seats).length,
+    history: g.history.map(h => ({ round: h.round, before: h.before, demand: h.demand, caught: h.caught, left: h.left, born: h.born, after: h.after, mine: h.picks[i], eaten: h.eaten, starvedCount: h.starved.length, meStarved: h.starved.includes(i) })),
+    myPick: g.picks[i], myTotal: g.totals[i], alive: g.alive[i], deadRound: g.deadRound[i], reason: g.reason,
+    aliveCount: g.alive.filter(Boolean).length,
+    submitted: g.picks.filter((p, j) => p != null && g.alive[j]).length, joined: Object.keys(room.seats).length,
   };
 }
 function sendTo(c, room) {
@@ -137,13 +153,13 @@ function teacherAct(room, b) {
     case 'set': {
       if (room.phase !== 'pick') break;
       const i = +b.i, v = b.v == null ? null : +b.v;
-      if (i >= 0 && i < st.n && (v === null || (v >= 0 && v <= st.maxCatch))) g.picks[i] = v;
+      if (i >= 0 && i < st.n && g.alive[i] && (v === null || (v >= 0 && v <= st.maxCatch))) g.picks[i] = v;
       break;
     }
     case 'fillEmpty': {
       if (room.phase !== 'pick') break;
       const v = Math.max(0, Math.min(st.maxCatch, +b.v || 0));
-      g.picks = g.picks.map(p => (p == null ? v : p));
+      g.picks = g.picks.map((p, i) => (p == null && g.alive[i] ? v : p));
       break;
     }
     case 'clear':
@@ -288,6 +304,7 @@ const server = http.createServer(async (req, res) => {
       if (room.phase !== 'pick') return json(res, 409, { error: '지금은 고를 수 없어요.' });
       const v = parseInt(b.v, 10);
       if (!(v >= 0 && v <= room.settings.maxCatch)) return json(res, 400, { error: '숫자를 다시 골라 주세요.' });
+      if (!room.game.alive[idxOf(room, num)]) return json(res, 409, { error: '수명이 아웃되어 더 이상 물고기를 잡을 수 없어요.' });
       room.game.picks[idxOf(room, num)] = v;
       broadcast(room);
       return json(res, 200, { ok: true });
