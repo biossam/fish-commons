@@ -174,7 +174,7 @@ details.settings summary::before{content:'⚙️ '}
 @media(max-width:900px){.joinpanel{grid-template-columns:1fr}}
 .qr{background:#fff;padding:14px;border-radius:18px;border:3px solid var(--blue2);width:fit-content}
 .qr img,.qr canvas{display:block}
-.bigcode{font-family:'Jua';font-size:92px;letter-spacing:12px;line-height:1;color:var(--coral)}
+.bigcode{font-family:'Jua';font-size:84px;letter-spacing:8px;line-height:1;color:var(--coral)}
 .joinurl{font-size:24px;font-family:'Jua';color:#2a86c4;word-break:break-all}
 .seatgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px;margin-top:14px}
 .seat{border:2px dashed var(--line);border-radius:14px;padding:8px 10px;min-height:56px;position:relative;font-size:14px;color:var(--sub)}
@@ -209,7 +209,7 @@ details.settings summary::before{content:'⚙️ '}
 .numgrid button.sel{background:var(--coral);color:#fff}
 .numgrid button:disabled{opacity:.3;cursor:not-allowed}
 .field{width:100%;border:2px solid var(--line);border-radius:14px;padding:14px;font:inherit;font-size:20px;color:var(--ink)}
-.codefield{font-family:'Jua';font-size:40px;text-align:center;letter-spacing:12px}
+.codefield{font-family:'Jua';font-size:36px;text-align:center;letter-spacing:8px}
 .err{background:var(--coral2);border-radius:12px;padding:10px 14px;margin-top:10px;font-size:15px}
 .ministeps{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}
 .ministeps .step{opacity:1;animation:none;padding:10px 6px}

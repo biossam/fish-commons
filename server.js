@@ -58,7 +58,7 @@ function grow(st, left) {
 const rid = n => crypto.randomBytes(n).toString('hex');
 function newCode() {
   for (;;) {
-    const c = String(1000 + Math.floor(Math.random() * 9000));
+    const c = String(crypto.randomInt(100000, 1000000)); // 6자리: 맞히기 어렵게
     if (!rooms.has(c)) return c;
   }
 }
@@ -75,9 +75,17 @@ function freshGame(room) {
   };
   room.phase = 'lobby';
 }
+// 방이 가득 차면, 아무도 접속해 있지 않고 30분 넘게 안 쓴 방부터 정리
+function makeSpace() {
+  if (rooms.size < MAX_ROOMS) return true;
+  let oldest = null;
+  for (const r of rooms.values()) if (r.clients.size === 0 && Date.now() - r.touched > 30 * 60e3 && (!oldest || r.touched < oldest.touched)) oldest = r;
+  if (oldest) { rooms.delete(oldest.code); return true; }
+  return false;
+}
 function createRoom(settings) {
   const room = {
-    code: newCode(), key: rid(12), settings: clampSettings(settings), rule: '', pact: null,
+    code: newCode(), key: rid(12), viewKey: rid(8), locked: false, settings: clampSettings(settings), rule: '', pact: null,
     seats: {}, clients: new Set(), gameNo: 0, hint: false, past: [], touched: Date.now(),
   };
   room.pact = clampPact({}, room.settings);
@@ -157,18 +165,20 @@ function teacherView(room) {
   const on = onlineSids(room);
   const seats = {};
   for (const n in room.seats) seats[n] = { nick: room.seats[n].nick, online: on.has(room.seats[n].sid) };
-  return { role: 't', code: room.code, settings: room.settings, phase: room.phase, rule: room.rule, pact: room.pact, hint: room.hint, seats, game: room.game, past: room.past };
+  return { role: 't', code: room.code, settings: room.settings, phase: room.phase, rule: room.rule, pact: room.pact, hint: room.hint, locked: room.locked, viewKey: room.viewKey, seats, game: room.game, past: room.past };
 }
 // TV 화면: 누가 냈는지만 보이고, 몇 마리 골랐는지는 보내지 않음
 function displayView(room) {
   const v = teacherView(room);
   const g = room.game;
   v.role = 'd';
+  delete v.viewKey;
   // 출어 금지인 친구도 TV에서는 '제출'로 보여서 누가 벌칙을 받는지 드러나지 않게 함
   const show = !!(g.pact.reveal || g.pact.grad);
   v.game = {
     ...g, picks: g.picks.map((p, i) => (p != null || g.banned[i] ? true : null)),
     banned: g.banned.map(() => false), strikes: g.strikes.map(() => 0),
+    totals: [...g.totals].sort((a, b) => b - a), totalsSorted: true, // 누가 몇 마리인지 연결 못 하게
     history: g.history.map(({ picks, kept, violators, banNext, confiscated, ...h }) => ({
       ...h, violatorsCount: show ? violators.length : null, banNextCount: banNext.length,
     })),
@@ -253,6 +263,9 @@ function teacherAct(room, b) {
     case 'hint':
       room.hint = !room.hint;
       break;
+    case 'lock':
+      room.locked = !room.locked;
+      break;
     case 'kick':
       delete room.seats[+b.num];
       break;
@@ -267,6 +280,8 @@ function joinSeat(room, b) {
   if (!st.nums.includes(num)) return [400, { error: '번호를 다시 골라 주세요.' }];
   const nick = cleanText(b.nick, 10);
   let sid = typeof b.sid === 'string' && /^[a-f0-9]{24}$/.test(b.sid) ? b.sid : null;
+  // 입장 잠금: 이미 들어와 있던 기기(같은 sid)만 다시 들어올 수 있음
+  if (room.locked && !(sid && seatOf(room, sid))) return [423, { error: '선생님이 입장을 잠갔어요. 선생님께 말해 주세요.' }];
   const cur = room.seats[num];
   if (cur && cur.sid !== sid) return [409, { error: `${num}번에는 이미 누가 들어와 있어요. 선생님께 말해 주세요.` }];
   if (!sid) sid = rid(12);
@@ -308,6 +323,7 @@ function clientIp(req) {
   return String(h['cf-connecting-ip'] || String(h['x-forwarded-for'] || '').split(',')[0] || req.socket.remoteAddress || '').trim();
 }
 function overLimit(req, bucket) {
+  if (hits.size > 50000) hits.clear(); // 아주 많은 주소로 공격해도 메모리가 넘치지 않게
   const [max, win] = LIMITS[bucket];
   const k = bucket + '|' + clientIp(req), now = Date.now();
   let h = hits.get(k);
@@ -316,6 +332,7 @@ function overLimit(req, bucket) {
   return h.n > max;
 }
 function noteMiss(req, code) {
+  if (misses.size > 50000) misses.clear();
   const ip = clientIp(req), now = Date.now();
   let m = misses.get(ip);
   if (!m || now > m.reset) { m = { codes: new Set(), reset: now + MISS_WINDOW }; misses.set(ip, m); }
@@ -330,11 +347,13 @@ function keyOk(room, key) {
   return crypto.timingSafeEqual(Buffer.from(key), Buffer.from(room.key));
 }
 // 글자 수와 위험한 기호를 정리 (화면에서도 한 번 더 escape 함)
-const cleanText = (t, n) => String(t == null ? '' : t).replace(/[\u0000-\u001f\u007f<>"'`]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
-const cleanMulti = (t, n) => String(t == null ? '' : t).replace(/[\u0000-\u0009\u000b-\u001f\u007f<>`]/g, '').slice(0, n);
+const BIDI = /[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g; // 글자 방향을 뒤집거나 숨기는 문자
+const cleanText = (t, n) => String(t == null ? '' : t).replace(BIDI, '').replace(/[\u0000-\u001f\u007f<>"'`]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
+const cleanMulti = (t, n) => String(t == null ? '' : t).replace(BIDI, '').replace(/[\u0000-\u0009\u000b-\u001f\u007f<>`]/g, '').slice(0, n);
 
 const SEC_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
+  'Strict-Transport-Security': 'max-age=31536000',
   'Referrer-Policy': 'no-referrer',
   'X-Frame-Options': 'DENY',
   'X-Robots-Tag': 'noindex, nofollow',
@@ -373,7 +392,8 @@ function serveStatic(req, res, pathname) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
+// connectionsCheckingInterval: 느린 연결을 2초마다 검사 (기본 30초라 slowloris에 약함)
+const server = http.createServer({ headersTimeout: 10e3, requestTimeout: 15e3, connectionsCheckingInterval: 2e3 }, async (req, res) => {
   for (const k in SEC_HEADERS) res.setHeader(k, SEC_HEADERS[k]);
   const url = new URL(req.url, 'http://x');
   const p = url.pathname, q = url.searchParams;
@@ -386,16 +406,19 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' });
       return res.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 26"><path d="M38 13 L28 4 Q27 13 28 22 Z" fill="#ff8a7a"/><ellipse cx="16" cy="13" rx="15" ry="10" fill="#ff8a7a"/><circle cx="9" cy="10.5" r="2.6" fill="#2e3a59"/></svg>');
     }
-    if (p === '/healthz') return json(res, 200, { ok: true, rooms: rooms.size });
+    if (p === '/healthz') return json(res, 200, { ok: true });
+    // 다른 사이트에서 몰래 보내는 요청(CSRF) 막기: POST는 JSON으로만 받음
+    if (req.method === 'POST' && !String(req.headers['content-type'] || '').startsWith('application/json')) return json(res, 415, { error: 'json only' });
 
     if (p === '/api/qr') {
       const t = String(q.get('t') || '').slice(0, 120);
+      if (!/^https?:\/\/[a-z0-9.:-]+\/s\?c=\d{6}$/i.test(t)) return json(res, 400, { error: 'qr' }); // 참여 주소만 QR로 만듦
       res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' });
       return res.end(qrSVG(t));
     }
     if (p === '/api/room' && req.method === 'POST') {
       if (overLimit(req, 'room')) return tooMany();
-      if (rooms.size >= MAX_ROOMS) return json(res, 503, { error: '지금은 방을 더 만들 수 없어요. 잠시 뒤 다시 해 주세요.' });
+      if (!makeSpace()) return json(res, 503, { error: '지금은 방을 더 만들 수 없어요. 잠시 뒤 다시 해 주세요.' });
       const b = await readBody(req);
       const room = createRoom(b.settings);
       return json(res, 200, { code: room.code, key: room.key });
@@ -453,13 +476,26 @@ const server = http.createServer(async (req, res) => {
       if (!room) return noRoom('no room', q.get('c'));
       if (role === 't' && !keyOk(room, q.get('key'))) return noRoom('key', 'key:' + q.get('c'));
       if (role !== 't' && role !== 's' && role !== 'd') return json(res, 400, { error: 'role' });
+      // TV 화면은 선생님 화면이 준 보기용 키가 있어야 함 (코드만 알아서는 못 봄)
+      if (role === 'd' && !(typeof q.get('v') === 'string' && q.get('v') === room.viewKey)) return noRoom('view', 'view:' + q.get('c'));
+      const sid = role === 's' ? String(q.get('sid') || '') : null;
+      // 자리가 없는 학생 기기: '자리 비움'을 한 번 알리고 바로 끊음 (연결만 쌓아 두는 공격 막기)
+      if (role === 's' && !seatOf(room, sid)) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(`retry: 600000\ndata: ${JSON.stringify({ role: 's', kicked: true, code: room.code })}\n\n`);
+        return;
+      }
+      // 같은 기기(학생 sid / 선생님 / TV)가 연결을 여러 개 열면 오래된 것부터 끊음
+      const same = [...room.clients].filter(x => x.role === role && (role !== 's' || x.sid === sid));
+      const maxSame = role === 's' ? 2 : 4;
+      while (same.length >= maxSame) { const old = same.shift(); room.clients.delete(old); try { old.res.end(); } catch (e) { /* noop */ } }
       if (room.clients.size >= MAX_CLIENTS_PER_ROOM) return tooMany();
       res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive', 'X-Accel-Buffering': 'no',
       });
       res.write('retry: 2000\n\n');
-      const c = { res, role, sid: role === 's' ? q.get('sid') : null };
+      const c = { res, role, sid };
       room.clients.add(c);
       if (role === 's') broadcast(room); else sendTo(c, room);
       const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) { /* noop */ } }, 20000);
@@ -500,4 +536,6 @@ setInterval(() => {
   }
 }, 10 * 60e3);
 
+// 느리게 보내서 연결을 붙잡아 두는 공격(slowloris) 막기. 실시간 연결(SSE)은 응답이라 영향 없음
+server.keepAliveTimeout = 65e3;
 server.listen(PORT, () => console.log(`물고기 마을의 호수: http://localhost:${PORT}`));

@@ -8,13 +8,13 @@ function saveMe(){try{me?localStorage.setItem('fish-student',JSON.stringify(me))
 function boot(){
   const c=new URLSearchParams(location.search).get('c');
   if(me&&(!c||c===me.code)){connect();return}
-  form.code=c&&/^\d{4}$/.test(c)?c:'';
+  form.code=c&&/^\d{6}$/.test(c)?c:'';
   if(form.code)loadInfo();else renderJoin();
 }
 
 /* ---------- 들어가기 ---------- */
 async function loadInfo(){info=null;renderJoin();
-  if(!/^\d{4}$/.test(form.code))return;
+  if(!/^\d{6}$/.test(form.code))return;
   try{const r=await fetch('/api/info?c='+form.code);const j=await r.json();
     if(!r.ok){renderJoin(j.error||'그런 방이 없어요.');return}info=j;renderJoin()}
   catch(e){renderJoin('연결이 안 돼요. 잠시 뒤 다시 해 보세요.')}}
@@ -25,17 +25,17 @@ function renderJoin(err){
   <div class="mehead"><div class="logo"><div class="badge"><svg viewBox="0 0 42 26"><use href="#fishSym"/></svg></div><div><h1 style="font-size:22px">물고기 마을의 호수</h1><small>마을에 들어가기</small></div></div></div>
   <div class="card">
     <h3 style="font-size:19px">① 참여 코드</h3>
-    <input class="field codefield" id="code" inputmode="numeric" maxlength="4" placeholder="0000" value="${esc(form.code)}" autocomplete="off">
+    <input class="field codefield" id="code" inputmode="numeric" maxlength="6" placeholder="000000" value="${esc(form.code)}" autocomplete="off">
     ${info?`<h3 style="font-size:19px;margin-top:18px">② 내 번호</h3><div class="numgrid">${nums}</div>
       <p class="muted" style="margin:0">흐린 번호는 이미 친구가 들어온 번호예요.</p>
       <h3 style="font-size:19px;margin-top:18px">③ 닉네임 <span class="muted">(안 써도 돼요 · 실명 말고 별명으로)</span></h3>
       <input class="field" id="nick" maxlength="10" placeholder="예) 고등어왕 (실명은 쓰지 마세요)" value="${esc(form.nick)}" autocomplete="off">
       <div class="startrow"><button class="btn big primary" data-act="join" ${form.num?'':'disabled'}>🐟 들어가기</button></div>`
-      :`<p class="muted" style="text-align:center">선생님 TV에 나온 숫자 4자리를 넣어 주세요.</p>`}
+      :`<p class="muted" style="text-align:center">선생님 TV에 나온 숫자 6자리를 넣어 주세요.</p>`}
     ${err?`<div class="err">${esc(err)}</div>`:''}
   </div>`;
   const ci=document.getElementById('code');
-  ci.addEventListener('input',()=>{form.code=ci.value.replace(/\D/g,'').slice(0,4);ci.value=form.code;if(form.code.length===4)loadInfo()});
+  ci.addEventListener('input',()=>{form.code=ci.value.replace(/\D/g,'').slice(0,6);ci.value=form.code;if(form.code.length===6)loadInfo()});
   const ni=document.getElementById('nick');if(ni)ni.addEventListener('input',()=>{form.nick=ni.value});
   if(!info)ci.focus();
 }

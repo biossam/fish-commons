@@ -9,7 +9,7 @@ let V=null,es=null,lastKey='',connected=false,gone=false;
 
 function loadLocal(){try{return JSON.parse(localStorage.getItem('fish-teacher'))||{}}catch(e){return{}}}
 function saveLocal(){if(TV)return;try{localStorage.setItem('fish-teacher',JSON.stringify(L))}catch(e){}}
-function tvURL(){return location.origin+'/tv?c='+V.code}
+function tvURL(){return location.origin+'/tv?c='+V.code+'&v='+V.viewKey}
 function joinURL(){return location.origin+'/s'}
 function numsOf(st){const skip=new Set((String(st.skip).match(/\d+/g)||[]).map(Number));const a=[];for(let i=1;i<=st.maxNum;i++)if(!skip.has(i))a.push(i);return a}
 function label(i){const num=V.settings.nums[i],s=V.seats[num];return s&&s.nick?`${num}번 ${s.nick}`:`${num}번`}
@@ -18,7 +18,7 @@ const aliveCount=()=>V.game.alive?V.game.alive.filter(Boolean).length:V.settings
 
 /* ---------- 연결 ---------- */
 async function boot(){
-  if(TV){const c=new URLSearchParams(location.search).get('c');if(c&&/^\d{4}$/.test(c)){L.auth={code:c};connect()}else renderTVCode();return}
+  if(TV){const qs=new URLSearchParams(location.search),c=qs.get('c'),v=qs.get('v');if(c&&/^\d{6}$/.test(c)&&v&&/^[a-f0-9]{16}$/.test(v)){L.auth={code:c,view:v};connect()}else renderTVCode();return}
   if(L.auth){
     try{const r=await fetch(`/api/check?c=${L.auth.code}&key=${L.auth.key}`);if(r.ok){connect();return}}catch(e){}
     L.auth=null;saveLocal();
@@ -28,7 +28,7 @@ async function boot(){
 function connect(){
   if(es)es.close();
   gone=false;
-  es=new EventSource(TV?`/api/events?c=${L.auth.code}&role=d`:`/api/events?c=${L.auth.code}&role=t&key=${L.auth.key}`);
+  es=new EventSource(TV?`/api/events?c=${L.auth.code}&role=d&v=${L.auth.view}`:`/api/events?c=${L.auth.code}&role=t&key=${L.auth.key}`);
   es.onmessage=ev=>{connected=true;V=JSON.parse(ev.data);update()};
   es.onerror=async()=>{connected=false;setConn();
     try{if(TV){const r=await fetch(`/api/info?c=${L.auth.code}`);if(r.status===404){es.close();V=null;renderTVCode('방이 사라졌어요. 선생님 화면에서 새 방을 만든 뒤, 새 코드를 넣어 주세요.')}return}
@@ -40,7 +40,7 @@ async function act(action,extra){if(!L.auth||TV)return;const r=await post('/api/
   if(!r.ok&&r.status===404){renderIntro('방을 찾을 수 없어요. 새 방을 만들어 주세요.')}}
 
 function update(){
-  const g=V.game,key=[V.phase,g.no,g.round,g.status,V.hint].join('|');
+  const g=V.game,key=[V.phase,g.no,g.round,g.status,V.hint,V.locked].join('|');
   if(key!==lastKey){lastKey=key;render();return}
   if(V.phase==='pick')renderGrid();
   else if(V.phase==='lobby')renderSeats();
@@ -133,9 +133,8 @@ function renderTVCode(notice){V=null;lastKey='';
   app.innerHTML=topHTML()+`${notice?`<div class="rulebar" style="background:var(--coral2);border-color:var(--coral)">⚠️ ${esc(notice)}</div>`:''}
   <div class="card" style="max-width:560px;margin:40px auto;text-align:center">
     <div style="font-size:54px">📺</div><h2 style="font-size:30px;margin:8px 0">TV 화면</h2>
-    <p class="muted" style="font-size:16px">선생님 화면에 나온 참여 코드 4자리를 넣어 주세요.</p>
-    <input class="field codefield" id="tvCode" inputmode="numeric" maxlength="4" placeholder="0000">
-    <div class="startrow"><button class="btn big primary" data-act="tvGo">보여 주기</button></div></div>`}
+    <p style="font-size:17px;line-height:1.7">TV 화면은 <b>선생님 조작 화면</b> 위쪽의<br><b>📺 TV 화면 열기</b> 버튼으로 열어 주세요.</p>
+    <p class="muted">보안을 위해 참여 코드만으로는 TV 화면을 열 수 없어요.</p></div>`}
 
 /* ---------- 대기실 ---------- */
 function renderLobby(){const st=V.settings,g=V.game;
@@ -155,11 +154,12 @@ function renderLobby(){const st=V.settings,g=V.game;
     <div class="rhead"><h2>${g.no>1?`${g.no}판째 · `:''}들어온 친구들</h2><span class="pill">들어옴 <b id="joinedCnt">0</b> / ${st.n}명</span>
       <span class="muted">기기가 없는 친구는 게임 중에 선생님이 대신 입력할 수 있어요.</span></div>
     <div class="seatgrid" id="seats"></div>
-    ${TV?`<p class="muted" style="text-align:center;margin-top:18px;font-size:17px">모두 들어오면 선생님이 1라운드를 시작해요 🐟</p>`:`<div class="startrow"><button class="btn big primary" data-act="open">🎣 ${g.no>1?'다시 ':''}1라운드 시작!</button></div>`}
+    ${TV?`<p class="muted" style="text-align:center;margin-top:18px;font-size:17px">모두 들어오면 선생님이 1라운드를 시작해요 🐟</p>`:`<div class="startrow">${lockBtn()}<button class="btn big primary" data-act="open">🎣 ${g.no>1?'다시 ':''}1라운드 시작!</button></div>`}
   </div>`;
   drawQR(document.getElementById('qrBox'),220);
   renderSeats();
 }
+function lockBtn(small){return TV?'':`<button class="btn ${small?'small':'big'} ${V.locked?'on':''}" data-act="lock" title="잠그면 새 기기는 들어올 수 없어요. 이미 들어온 친구는 다시 연결할 수 있어요.">${V.locked?'🔒 입장 잠김 (풀기)':'🔓 입장 잠그기'}</button>`}
 function renderSeats(){const box=document.getElementById('seats');if(!box)return;const st=V.settings;let h='',cnt=0;
   st.nums.forEach(num=>{const s=V.seats[num];if(s)cnt++;
     h+=s?`<div class="seat in ${s.online?'':'away'}"><b>${num}번</b><span class="dot ${s.online?'':'away'}"></span>${esc(s.nick||'')}${s.online?'':' (나감)'}${TV?'':`<button class="x" data-act="kick" data-num="${num}" title="자리 비우기">✕</button>`}</div>`
@@ -189,6 +189,7 @@ function renderPlay(){const g=V.game,st=V.settings,pct=g.fish/st.cap,safe=safeCa
         <button class="btn small ${L.hide?'on':''}" data-act="hide">👀 ${L.hide?'선택 가리는 중':'선택 보이는 중'}</button>
         <button class="btn small" data-act="fillEmpty" data-v="0">안 낸 친구 0마리로</button>
         <button class="btn small" data-act="clear">🧹 모두 지우기</button>
+        ${lockBtn(true)}
       </div>`}
       <div class="grid" id="grid"></div>
       ${TV?`<p class="muted" style="margin-top:14px;font-size:16px">자기 기기에서 몰래 골라요. 모두 내면 선생님이 결과를 보여 줘요.</p>`:`<div class="actbar"><button class="btn big primary" data-act="resolve" ${picking?'':'disabled'}>🎣 결과 보기</button><div id="warnBox"></div></div>`}
@@ -249,8 +250,8 @@ function renderEnd(){const g=V.game,st=V.settings,ok=g.status==='success',tot=su
   const rows=[];for(let k=1;k<=st.maxCatch;k++){const r=simEqual(st,k);rows.push(`<tr><td>모두 ${k}마리씩</td><td>${r.ok?`<span class="tag ok">${st.rounds}라운드 완주</span>`:r.why==='starve'?`<span class="tag no">${r.round}라운드에 모두 탈락</span>`:`<span class="tag no">${r.round}라운드에 붕괴</span>`}</td><td>${r.ok?r.per+'마리':'0마리'}</td></tr>`)}
   rows.push(`<tr><td>호수를 지키며 최대로<br><span class="muted">(매 라운드 반 전체 ${best.first}마리 정도)</span></td><td><span class="tag ok">${st.rounds}라운드 완주</span></td><td>약 ${Math.max(0,best.per).toFixed(1)}마리</td></tr>`);
   rows.push(`<tr class="us"><td>우리 반 실제 결과</td><td>${ok?`<span class="tag ok">${st.rounds}라운드 완주</span>`:`<span class="tag no">${g.collapseRound}라운드에 붕괴</span>`}</td><td>${ok?(aliveCount()<st.n?`살아남은 ${aliveCount()}명 평균 ${(tot/Math.max(1,aliveCount())).toFixed(1)}마리`:(tot/st.n).toFixed(1)+'마리 (평균)'):'0마리'}</td></tr>`);
-  const order=g.totals.map((v,i)=>({v,i})).sort((a,b)=>b.v-a.v),mx=Math.max(1,...g.totals);
-  const rank=order.map((o,j)=>`<div class="rk ${ok&&isAlive(o.i)?'':'lost'}"><span class="muted">${j+1}</span><span class="nm">${isAlive(o.i)?'':'😵 '}${TV?'':esc(label(o.i))}</span><span class="bar"><i style="width:${o.v/mx*100}%"></i></span><span class="v">${o.v}</span></div>`).join('');
+  const order=g.totals.map((v,i)=>({v,i})).sort((a,b)=>b.v-a.v),mx=Math.max(1,...g.totals),anon=!!g.totalsSorted;
+  const rank=order.map((o,j)=>`<div class="rk ${ok&&(anon||isAlive(o.i))?'':'lost'}"><span class="muted">${j+1}</span><span class="nm">${anon?'':(isAlive(o.i)?'':'😵 ')+esc(label(o.i))}</span><span class="bar"><i style="width:${o.v/mx*100}%"></i></span><span class="v">${o.v}</span></div>`).join('');
   app.innerHTML=topHTML()+ruleBar()+`
   <div class="card">
     <div class="endhead"><div class="emo">${ok?'🎉':'😵'}</div>
@@ -323,9 +324,7 @@ document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-ac
     case 'clear':confirmBox('모든 친구의 선택을 지울까요?',()=>act('clear'));break;
     case 'hide':L.hide=!L.hide;saveLocal();renderPlay();break;
     case 'hint':act('hint');break;
-    case 'tvGo':{const c=(document.getElementById('tvCode').value||'').trim();if(!/^\d{4}$/.test(c))break;
-      const r=await fetch('/api/info?c='+c);if(!r.ok){renderTVCode('그런 방이 없어요. 코드를 다시 확인해 주세요.');break}
-      history.replaceState(null,'','/tv?c='+c);L.auth={code:c};connect();break}
+    case 'lock':act('lock');break;
     case 'resolve':tryResolve(false);break;
     case 'resolveForce':tryResolve(true);break;
     case 'next':modal.innerHTML='';act('next');window.scrollTo({top:0,behavior:'smooth'});break;
