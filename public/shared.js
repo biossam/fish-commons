@@ -39,3 +39,17 @@ function roundMsg(e,status,st){
   if(e.after>=e.before)return{cls:'good',msg:`호수가 건강해요! 물고기가 <b>${e.after}마리</b> 있어요. 😊`};
   const drop=e.before-e.after;return{cls:e.after<st.cap*.4?'bad':'warn',msg:`호수의 물고기가 <b>${drop}마리</b> 줄었어요. 이대로 계속 잡으면 어떻게 될까요? 🤔`}}
 async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let j={};try{j=await r.json()}catch(e){}return{ok:r.ok,status:r.status,data:j}}
+/* 우리 반 약속 · 벌칙 */
+const PACT_INFO=[
+  {k:'reveal',e:'📢',t:'알리기',d:'라운드가 끝나면 약속을 어긴 친구가 <b>몇 명</b>인지 TV에 알려요. 이름은 나오지 않아요.'},
+  {k:'ret',e:'↩️',t:'물고기 돌려놓기',d:'약속보다 더 잡은 물고기는 내 것이 되지 않고 <b>호수로 돌아가요</b>.',rec:true},
+  {k:'ban',e:'⛔',t:'출어 금지',d:'약속을 어기면 <b>다음 1라운드</b> 동안 물고기를 잡을 수 없어요. (그 라운드에는 먹지 않아도 돼요)'},
+  {k:'grad',e:'🪜',t:'단계적 벌칙',d:'1번 어기면 경고(인원 알리기) → 2번째부터 돌려놓기 → 3번째부터 돌려놓기 + 출어 금지.'},
+  {k:'cap',e:'🔒',t:'어획 한도',d:'약속보다 많이는 <b>아예 고를 수 없게</b> 버튼을 막아요.'},
+];
+function pactOn(P){return !!P&&PACT_INFO.some(x=>P[x.k])}
+function pactText(P){if(!pactOn(P))return '';const names=PACT_INFO.filter(x=>P[x.k]).map(x=>x.e+' '+x.t).join(', ');
+  return `한 라운드에 1인당 <b>${P.limit}마리</b>까지 · ${P.cap?'':'어기면 '}${names}`}
+function pactBar(P,rule){const pt=pactText(P),r=String(rule||'').trim();if(!pt&&!r)return '';
+  return `<div class="rulebar"><b>📜 우리 반 약속</b><span>${pt}${pt&&r?'<br>':''}${esc(r).replace(/\n/g,'<br>')}</span></div>`}
+function outsFor(st,stash,catchN){const e=st.eat||0;if(e<=0)return false;return st.out==='zero'?stash+catchN-e<=0:stash+catchN<e}

@@ -1,6 +1,6 @@
 /* 선생님 조작 화면(/)과 TV 화면(/tv)이 함께 쓰는 코드. TV 화면은 window.TV_MODE = true */
 const TV=!!window.TV_MODE;
-const DEF={maxNum:24,skip:'16',start:100,cap:100,growth:50,maxCatch:3,rounds:10,eat:1};
+const DEF={maxNum:24,skip:'16',start:100,cap:100,growth:50,maxCatch:3,rounds:10,eat:1,out:'empty'};
 const app=document.getElementById('app'),modal=document.getElementById('modal');
 let L=TV?{}:loadLocal();
 L.settings={...DEF,...(L.settings||{})};
@@ -71,7 +71,9 @@ function topHTML(){let dots='';
       ${TV?'':`<a class="btn small" href="${tvURL()}" target="_blank" rel="noopener" style="text-decoration:none">📺 TV 화면 열기</a>
       <button class="btn small" data-act="leave">🚪 방 나가기</button>`}`:''}</div>`}
 function tvTip(){return TV?'':`<div class="rulebar" style="background:#e6f4ff;border-color:var(--blue)"><b>🧑‍🏫 선생님 조작 화면</b><span>학생들이 고른 숫자가 보이는 화면이에요. 반 전체에는 <a href="${tvURL()}" target="_blank" rel="noopener"><b>📺 TV 화면</b></a>(${esc(tvURL())})을 띄워 주세요.</span></div>`}
-function ruleBar(){return tvTip()+(V&&V.rule.trim()?`<div class="rulebar"><b>📜 우리 반 약속</b><span>${esc(V.rule).replace(/\n/g,'<br>')}</span></div>`:'')}
+function ruleBar(){return tvTip()+(V?pactBar(V.game.pact,V.rule):'')}
+const isBanned=i=>!!(V.game.banned&&V.game.banned[i]);
+function pactDraft(){if(!L.pactDraft){const P=V&&V.pact;L.pactDraft=pactOn(P)?{...P}:{limit:1,reveal:false,ret:true,ban:false,grad:false,cap:false}}return L.pactDraft}
 
 /* ---------- 처음 화면 ---------- */
 function renderIntro(notice){
@@ -92,8 +94,8 @@ function renderIntro(notice){
     <div class="rule r1"><span class="num">규칙 1</span><h3>몰래 정해요</h3>라운드마다 내 기기에서 물고기를 <b>0~${st.maxCatch}마리</b> 중에 몇 마리 잡을지 몰래 골라요.</div>
     <div class="rule r2"><span class="num">규칙 2</span><h3>물고기가 늘어나요</h3>잡고 남은 물고기의 <b>${st.growth}%</b>만큼 새끼가 태어나요. 단, 호수에는 최대 <b>${st.cap}마리</b>까지만 살 수 있어요.</div>
     <div class="rule r3"><span class="num">규칙 3</span><h3>텅 비면 모두 아웃</h3>잡으려는 물고기가 호수의 물고기보다 많아 <b>호수가 텅 비면</b> 마을 모두의 수명 아웃! 잡아 둔 물고기도 모두 사라져요.</div>
-    ${st.eat>0?`<div class="rule r5"><span class="num">규칙 4</span><h3>먹고 살아요</h3>라운드가 끝날 때마다 살기 위해 내 물고기 <b>${st.eat}마리</b>를 먹어요. 먹고 나서 내 물고기가 <b>0마리</b>면 탈락! 다음 라운드에 나갈 수 없어요.</div>`:''}
-    <div class="rule r4"><span class="num">규칙 ${st.eat>0?5:4}</span><h3>끝까지 살아남기</h3><b>${st.rounds}라운드</b>까지 호수를 지키면, 그동안 잡은 물고기가 내 점수가 돼요.</div>
+    ${st.eat>0?`<div class="rule r5"><span class="num">규칙 4</span><h3>먹고 살아요</h3>라운드가 끝날 때마다 살기 위해 내 물고기 <b>${st.eat}마리</b>를 먹어요. ${st.out==='zero'?'먹고 나서 내 물고기가 <b>0마리</b>면 탈락!':'먹을 물고기가 <b>없으면</b> 탈락! (먹고 0마리가 되는 건 괜찮아요)'} 탈락하면 다음 라운드에 나갈 수 없어요.</div>`:''}
+    <div class="rule r4"><span class="num">규칙 ${st.eat>0?5:4}</span><h3>끝까지 살아남기</h3><b>${st.rounds}라운드</b>까지 호수를 지키면, ${st.eat>0?'먹고 남은':'그동안 잡은'} 물고기가 내 점수가 돼요.</div>
   </div>
   <div class="introgrid">
     <div class="card tips"><h3>🧑‍🏫 진행 방법</h3><ol>
@@ -115,6 +117,9 @@ function renderIntro(notice){
         <label>호수 최대 물고기 수<input type="number" min="10" max="300" data-set="cap" value="${st.cap}"></label>
         <label>번식률 (남은 물고기의 %)<input type="number" min="0" max="100" data-set="growth" value="${st.growth}"></label>
         <label>라운드마다 먹는 물고기 (0이면 끔)<input type="number" min="0" max="3" data-set="eat" value="${st.eat}"></label>
+        <label>탈락 기준<select data-set="out" style="border:2px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;font-size:16px;color:var(--ink)">
+          <option value="empty" ${st.out!=='zero'?'selected':''}>먹을 물고기가 없을 때 (추천)</option>
+          <option value="zero" ${st.out==='zero'?'selected':''}>먹고 나서 0마리가 될 때</option></select></label>
       </div>
       <p class="muted">호수가 가득 찼을 때 반 전체가 한 라운드에 <b>${safeCatch(sim,st.cap)}마리</b>까지 잡아야 호수가 줄지 않아요. (모두 1마리씩이면 ${n}마리, 모두 2마리씩이면 ${n*2}마리) <button class="btn small" data-act="resetSettings">기본값으로</button></p>
       </details>
@@ -194,18 +199,19 @@ function renderPlay(){const g=V.game,st=V.settings,pct=g.fish/st.cap,safe=safeCa
 function renderGrid(){const box=document.getElementById('grid');if(!box)return;const g=V.game,st=V.settings;let h='';
   st.nums.forEach((num,i)=>{const p=g.picks[i],s=V.seats[num];let b='';
     if(!isAlive(i)){h+=`<div class="st dead"><div class="nm"><b title="${esc(label(i))}">${esc(label(i))}</b><span>😵</span></div><div class="dev">${g.deadRound[i]}라운드에 탈락</div><div class="deadmsg">물고기 0마리 😵</div></div>`;return}
+    if(!TV&&isBanned(i)){h+=`<div class="st banned"><div class="nm"><b title="${esc(label(i))}">${esc(label(i))}</b><span>모은 🐟 ${g.totals[i]}</span></div><div class="dev">약속 ${g.strikes[i]}번 어김</div><div class="deadmsg" style="color:#c5503f">⛔ 이번 라운드 출어 금지</div></div>`;return}
     if(TV)b=`<div class="muted" style="text-align:center;padding:6px 0;font-size:15px">${p!=null?'<b style="color:#2a86c4">제출했어요 ✓</b>':'고르는 중…'}</div>`;
-    else for(let v=0;v<=st.maxCatch;v++)b+=`<button class="${p===v?'sel c'+v:''}" data-act="set" data-i="${i}" data-v="${v}">${v}</button>`;
+    else for(let v=0;v<=st.maxCatch;v++)b+=`<button class="${p===v?'sel c'+v:''}" data-act="set" data-i="${i}" data-v="${v}" ${g.pact&&g.pact.cap&&v>g.pact.limit?'disabled style="opacity:.3"':''}>${v}</button>`;
     const dev=s?`<span class="dot ${s.online?'':'away'}"></span>${s.online?'기기로 참여':'기기 연결 끊김'}`:(TV?'아직 안 들어옴':'선생님이 입력');
-    h+=`<div class="st ${p!=null?'done':''} ${s?'byDevice':''}"><div class="chk">✓</div><div class="nm"><b title="${esc(label(i))}">${esc(label(i))}</b><span>모은 🐟 ${g.totals[i]}</span></div><div class="dev">${dev}</div>${TV?b:`<div class="opts">${b}</div>`}</div>`});
+    h+=`<div class="st ${p!=null?'done':''} ${s?'byDevice':''}"><div class="chk">✓</div><div class="nm"><b title="${esc(label(i))}">${esc(label(i))}</b><span>모은 🐟 ${g.totals[i]}</span></div><div class="dev">${dev}${!TV&&g.strikes&&g.strikes[i]?`<span class="strike">⚠️ 약속 ${g.strikes[i]}번 어김</span>`:''}</div>${TV?b:`<div class="opts">${b}</div>`}</div>`});
   box.innerHTML=h;
-  document.getElementById('cntDone').textContent=g.picks.filter((p,i)=>p!=null&&isAlive(i)).length;
+  document.getElementById('cntDone').textContent=g.picks.filter((p,i)=>(p!=null||isBanned(i))&&isAlive(i)).length;
   const ca=document.getElementById('cntAlive');if(ca)ca.textContent=aliveCount();
   document.getElementById('cntSum').textContent=TV||L.hide?'?':sum(g.picks);
   const w=document.getElementById('warnBox');if(w)w.innerHTML='';
 }
-function tryResolve(force){const g=V.game,missing=g.picks.filter((p,i)=>p==null&&isAlive(i)).length;
-  if(missing&&!force){const who=V.settings.nums.filter((n,i)=>g.picks[i]==null&&isAlive(i)).map(n=>n+'번').join(', ');
+function tryResolve(force){const g=V.game,need=i=>g.picks[i]==null&&isAlive(i)&&!isBanned(i),missing=g.picks.filter((p,i)=>need(i)).length;
+  if(missing&&!force){const who=V.settings.nums.filter((n,i)=>need(i)).map(n=>n+'번').join(', ');
     document.getElementById('warnBox').innerHTML=`<div class="warn">아직 안 낸 친구 <b>${missing}명</b>: ${esc(who)} <button class="btn small" data-act="resolveForce">0마리로 하고 진행</button></div>`;return}
   if(missing)act('fillEmpty',{v:0}).then(()=>act('resolve'));else act('resolve')}
 
@@ -221,14 +227,24 @@ function showRoundModal(){const g=V.game,st=V.settings,e=g.history[g.history.len
       <div class="step" style="background:var(--yellow2);animation-delay:1.25s"><div class="e">${e.after>0?'🏞️':'🏜️'}</div><div class="v">${e.after}</div><div class="l">${g.status==='play'?'다음 라운드 물고기':'라운드 후 호수'}${e.left+e.born>st.cap?`<br>(최대 ${st.cap}마리)`:''}</div></div>
     </div>
     <div class="msg ${m.cls}">${m.msg}</div>
-    ${e.starved&&e.starved.length?`<div class="msg bad" style="margin-top:10px">😵 먹고 나니 물고기가 0마리! <b>${e.starved.length}명</b>이 탈락해서 다음 라운드에 나갈 수 없어요: ${e.starved.map(i=>esc(label(i))).join(', ')}</div>`:''}
+    ${penaltyHTML(e,g)}
+    ${e.starved&&e.starved.length?`<div class="msg bad" style="margin-top:10px">😵 ${st.out==='zero'?'먹고 나니 물고기가 0마리!':'먹을 물고기가 모자랐어요!'} <b>${e.starved.length}명</b>이 탈락해서 다음 라운드에 나갈 수 없어요: ${e.starved.map(i=>esc(label(i))).join(', ')}</div>`:''}
     <div style="text-align:center;margin-top:20px">${TV?`<p class="muted" style="font-size:16px">선생님이 다음으로 넘길 때까지 잠깐 이야기해 봐요.</p>`:`<button class="btn big ${g.status==='collapsed'?'primary':'blue'}" data-act="next">${nextLabel}</button>`}</div>
   </div></div>`}
 
+function penaltyHTML(e,g){const P=g.pact;if(!pactOn(P)||P.cap)return '';
+  const names=arr=>arr.map(i=>esc(label(i))).join(', ');
+  const vc=e.violators?e.violators.length:e.violatorsCount,bc=e.banNext?e.banNext.length:e.banNextCount,lines=[];
+  if(vc!=null)lines.push(vc?`🚨 약속(1인당 ${P.limit}마리)을 어긴 친구 <b>${vc}명</b>${!TV&&e.violators?` <span class="muted">(${names(e.violators)})</span>`:''}`:`🌟 이번 라운드는 <b>모두 약속을 지켰어요!</b>`);
+  if(e.returned)lines.push(`↩️ 약속보다 더 잡아서 호수로 돌려놓은 물고기 <b>${e.returned}마리</b>`);
+  if(bc)lines.push(`⛔ 다음 라운드 출어 금지 <b>${bc}명</b>${!TV&&e.banNext?` <span class="muted">(${names(e.banNext)})</span>`:''}`);
+  if(!lines.length&&!TV&&e.violators&&!e.violators.length)lines.push('🌟 이번 라운드는 모두 약속을 지켰어요!');
+  return lines.length?`<div class="penal">${lines.join('<br>')}</div>`:''}
+
 /* ---------- 끝 ---------- */
-function simEqual(st,k){const e=st.eat||0;let N=st.start;for(let r=1;r<=st.rounds;r++){const d=st.n*k;if(d>=N)return{ok:false,round:r,why:'lake'};if(e>0&&k<=e)return{ok:false,round:r,why:'starve'};N=growWith(st,N-d).after}return{ok:true,per:(k-e)*st.rounds}}
+function simEqual(st,k){const e=st.eat||0;let N=st.start;for(let r=1;r<=st.rounds;r++){const d=st.n*k;if(d>=N)return{ok:false,round:r,why:'lake'};if(e>0&&(st.out==='zero'?k<=e:k<e))return{ok:false,round:r,why:'starve'};N=growWith(st,N-d).after}return{ok:true,per:(k-e)*st.rounds}}
 function simBest(st){let N=st.start,tot=0,first=null;const lim=st.n*st.maxCatch;for(let r=1;r<=st.rounds;r++){const c=Math.min(safeCatch(st,N),lim);if(first==null)first=c;tot+=c;N=growWith(st,N-c).after}return{tot,first,per:(tot-st.n*(st.eat||0)*st.rounds)/st.n,okEat:first>=st.n*(st.eat||0)}}
-function pastHTML(){return `<ul class="past" style="padding:0;margin:6px 0 0">${V.past.map(p=>`<li>${p.no}판 · ${p.ok?`<span class="tag ok">성공</span> ${p.rounds}라운드 완주 · 반 전체 ${p.total}마리`:`<span class="tag no">호수 붕괴</span> ${p.round}라운드에서 텅 빔`}${p.rule?` · 약속: “${esc(p.rule.length>30?p.rule.slice(0,30)+'…':p.rule)}”`:''}</li>`).join('')}</ul>`}
+function pastHTML(){return `<ul class="past" style="padding:0;margin:6px 0 0">${V.past.map(p=>`<li>${p.no}판 · ${p.ok?`<span class="tag ok">성공</span> ${p.rounds}라운드 완주 · 반 전체 ${p.total}마리`:`<span class="tag no">호수 붕괴</span> ${p.round}라운드에서 텅 빔`}${p.pact&&pactOn(p.pact)?` · 약속 ${p.pact.limit}마리 (${PACT_INFO.filter(x=>p.pact[x.k]).map(x=>x.t).join(', ')})`:''}${p.alive!=null&&p.ok?` · 생존 ${p.alive}명`:''}${p.rule?` · “${esc(p.rule.length>24?p.rule.slice(0,24)+'…':p.rule)}”`:''}</li>`).join('')}</ul>`}
 function renderEnd(){const g=V.game,st=V.settings,ok=g.status==='success',tot=sum(g.totals),best=simBest(st);
   const rows=[];for(let k=1;k<=st.maxCatch;k++){const r=simEqual(st,k);rows.push(`<tr><td>모두 ${k}마리씩</td><td>${r.ok?`<span class="tag ok">${st.rounds}라운드 완주</span>`:r.why==='starve'?`<span class="tag no">${r.round}라운드에 모두 탈락</span>`:`<span class="tag no">${r.round}라운드에 붕괴</span>`}</td><td>${r.ok?r.per+'마리':'0마리'}</td></tr>`)}
   rows.push(`<tr><td>호수를 지키며 최대로<br><span class="muted">(매 라운드 반 전체 ${best.first}마리 정도)</span></td><td><span class="tag ok">${st.rounds}라운드 완주</span></td><td>약 ${Math.max(0,best.per).toFixed(1)}마리</td></tr>`);
@@ -242,7 +258,7 @@ function renderEnd(){const g=V.game,st=V.settings,ok=g.status==='success',tot=su
       <p>${ok?(aliveCount()<st.n?`호수는 지켰지만 <b>${st.n-aliveCount()}명</b>은 물고기가 0마리가 되어 탈락했어요. 살아남은 친구는 먹고 남은 물고기가 점수예요.`:'마을 사람 모두가 끝까지 물고기를 먹으며 살아남았어요. 먹고 남은 물고기가 점수예요.'):g.reason==='starved'?'호수에 물고기는 남았지만, 모두 물고기가 0마리가 되어 탈락했어요.':'물고기가 더 이상 태어날 수 없어 마을 사람 <b>모두의 수명이 아웃</b>! 그동안 잡아 둔 물고기도 모두 사라졌어요.'}</p></div>
     <div class="endstats">
       <div class="es"><div class="v">${ok?tot:`<s style="color:#b3bccb">${tot}</s>`}</div><div class="l">${ok?'먹고 남은 물고기 (반 전체)':'잡았지만 사라진 물고기'}</div></div>
-      ${st.eat>0?`<div class="es"><div class="v">${aliveCount()} / ${st.n}</div><div class="l">살아남은 사람</div></div>`:''}
+      ${st.eat>0&&ok?`<div class="es"><div class="v">${aliveCount()} / ${st.n}</div><div class="l">살아남은 사람</div></div>`:''}
       <div class="es"><div class="v">${ok?st.rounds:g.collapseRound-1} / ${st.rounds}</div><div class="l">무사히 끝낸 라운드</div></div>
       <div class="es"><div class="v">${g.fish}</div><div class="l">호수에 남은 물고기</div></div>
       <div class="es"><div class="v">${best.tot}</div><div class="l">호수를 지키며 잡을 수 있었던 최대</div></div>
@@ -266,15 +282,22 @@ function renderEnd(){const g=V.game,st=V.settings,ok=g.status==='success',tot=su
       <li>약속을 어기고 더 많이 잡는 친구가 있다면 어떻게 하면 좋을까요?</li>
       <li>실제 세상에도 이런 일이 있을까요? (바다의 물고기, 숲, 깨끗한 공기, 학교의 공용 물건…)</li>
     </ol></div>
-    ${TV?`<div class="card promise"><h3>📜 우리 반 약속 정하기</h3><p style="font-size:18px;line-height:1.7">모두가 끝까지 물고기를 잡으려면 어떤 약속이 필요할까요? 회의로 정한 약속은 선생님이 적어서 다음 판에 보여 줘요.</p>
-      ${V.past.length?`<h3 style="margin-top:16px;font-size:18px">📚 지금까지의 게임</h3>${pastHTML()}`:''}</div>`:`<div class="card promise"><h3>📜 우리 반 약속 정하기</h3><p class="muted">회의로 정한 약속을 적고 다시 해 보세요. 선생님 화면과 학생 기기 화면 위에 계속 보여요.</p>
-      <textarea id="ruleTxt" placeholder="예) 한 라운드에 한 사람당 1마리만 잡기. 호수가 80마리보다 적으면 모두 0마리 쉬기.">${esc(L.ruleDraft!=null?L.ruleDraft:V.rule)}</textarea>
-      <div class="startrow" style="justify-content:flex-start;margin-top:12px">
-        <button class="btn mint" data-act="restartRule">📜 약속 지키며 다시 하기</button>
-        <button class="btn" data-act="restart">🔁 그냥 다시 하기</button></div>
-      ${V.past.length?`<h3 style="margin-top:16px;font-size:18px">📚 지금까지의 게임</h3>${pastHTML()}`:''}</div>`}
+    ${TV?`<div class="card promise"><h3>📜 우리 반 약속 정하기</h3><p style="font-size:18px;line-height:1.7">모두가 끝까지 물고기를 잡으려면 <b>한 사람당 몇 마리까지</b> 잡기로 약속할까요? 약속을 어기면 어떤 벌칙이 좋을까요?</p>
+      <div class="pactgrid">${PACT_INFO.map((x,n)=>`<div class="pact"><span class="pe">${x.e}</span><span><span class="pt">${n+1}. ${x.t}</span>${x.d}</span><span></span></div>`).join('')}</div>
+      ${V.past.length?`<h3 style="margin-top:16px;font-size:18px">📚 지금까지의 게임</h3>${pastHTML()}`:''}</div>`:`<div class="card promise" id="promiseCard">${promiseHTML()}</div>`}
   </div>`;
 }
+function promiseHTML(){const st=V.settings,d=pactDraft();
+  const cards=PACT_INFO.map((x,n)=>`<button class="pact ${d[x.k]?'on':''}" data-act="pact" data-k="${x.k}"><span class="pe">${x.e}</span><span><span class="pt">${n+1}. ${x.t}${x.rec?'<span class="rec">추천</span>':''}</span>${x.d}</span><span class="pbox">${d[x.k]?'✓':''}</span></button>`).join('');
+  return `<h3>📜 우리 반 약속 정하기</h3><p class="muted">회의로 약속을 정하고, 어겼을 때의 벌칙을 골라요. 여러 개를 함께 고를 수 있어요. (단계적 벌칙과 어획 한도는 따로 써요)</p>
+      <div class="limitrow">한 라운드에 1인당 <button data-act="limit" data-d="-1">−</button><b>${d.limit}</b><button data-act="limit" data-d="1">+</button> 마리까지만 잡기</div>
+      ${st.eat>0&&(st.out==='zero'?d.limit<=st.eat:d.limit<st.eat)?`<div class="err">이 약속을 지키면 먹을 물고기가 모자라 모두 탈락할 수 있어요. 약속 마리 수를 다시 생각해 봐요.</div>`:''}
+      <div class="pactgrid">${cards}</div>
+      <textarea id="ruleTxt" placeholder="그 밖의 약속을 적어요. 예) 호수가 50마리보다 적으면 모두 1마리만 잡기">${esc(L.ruleDraft!=null?L.ruleDraft:V.rule)}</textarea>
+      <div class="startrow" style="justify-content:flex-start;margin-top:12px">
+        <button class="btn mint" data-act="restartRule">📜 약속 지키며 다시 하기</button>
+        <button class="btn" data-act="restart">🔁 약속 없이 다시 하기</button></div>
+      ${V.past.length?`<h3 style="margin-top:16px;font-size:18px">📚 지금까지의 게임</h3>${pastHTML()}`:''}`}
 
 /* ---------- 작은 창 ---------- */
 function confirmBox(html,onYes){modal.innerHTML=`<div class="back"><div class="box" style="max-width:440px;text-align:center"><p style="font-size:18px;line-height:1.6">${html}</p>
@@ -306,14 +329,21 @@ document.addEventListener('click',async ev=>{const b=ev.target.closest('[data-ac
     case 'resolve':tryResolve(false);break;
     case 'resolveForce':tryResolve(true);break;
     case 'next':modal.innerHTML='';act('next');window.scrollTo({top:0,behavior:'smooth'});break;
-    case 'restartRule':{const rule=document.getElementById('ruleTxt').value;L.ruleDraft=null;saveLocal();act('newgame',{rule});break}
-    case 'restart':L.ruleDraft=null;saveLocal();act('newgame',{rule:V.rule});break;
+    case 'restartRule':{const rule=document.getElementById('ruleTxt').value,pact={...pactDraft()};L.ruleDraft=null;L.pactDraft=null;saveLocal();act('newgame',{rule,pact});break}
+    case 'restart':L.ruleDraft=null;L.pactDraft=null;saveLocal();act('newgame',{rule:'',pact:{limit:1}});break;
+    case 'pact':{const d=pactDraft(),k=b.dataset.k;d[k]=!d[k];
+      if(d[k]&&k==='cap'){d.reveal=d.ret=d.ban=d.grad=false}
+      if(d[k]&&k==='grad'){d.reveal=d.ret=d.ban=d.cap=false}
+      if(d[k]&&['reveal','ret','ban'].includes(k)){d.grad=d.cap=false}
+      saveLocal();document.getElementById('promiseCard').innerHTML=promiseHTML();break}
+    case 'limit':{const d=pactDraft();d.limit=Math.max(0,Math.min(V.settings.maxCatch,d.limit+ +b.dataset.d));saveLocal();document.getElementById('promiseCard').innerHTML=promiseHTML();break}
     case 'cancel':modal.innerHTML='';break;
     case 'yes':modal.innerHTML='';confirmBox.cb&&confirmBox.cb();break;
   }});
 document.addEventListener('input',ev=>{if(ev.target.id==='ruleTxt'){L.ruleDraft=ev.target.value;saveLocal()}});
 document.addEventListener('change',ev=>{const t=ev.target;if(!t.dataset.set)return;const k=t.dataset.set,st=L.settings;
   if(k==='skip')st.skip=t.value;
+  else if(k==='out')st.out=t.value==='zero'?'zero':'empty';
   else{const lim={maxNum:[2,40],rounds:[3,20],start:[5,300],cap:[10,300],growth:[0,100],maxCatch:[1,5],eat:[0,3]}[k];let v=parseInt(t.value,10);if(isNaN(v))v=DEF[k];st[k]=Math.max(lim[0],Math.min(lim[1],v))}
   if(st.start>st.cap)st.start=st.cap;
   saveLocal();renderIntro();document.querySelector('details.settings').open=true});

@@ -32,8 +32,24 @@ function clampSettings(s) {
   if (o.nums.length < 2) o.nums = [1, 2];
   o.skip = [...skipSet].sort((a, b) => a - b).join(', ');
   o.n = o.nums.length;
+  // 탈락 기준 — empty: 먹을 물고기가 없을 때 탈락(먹고 0마리는 괜찮음) / zero: 먹고 나서 0마리면 탈락
+  o.out = s.out === 'zero' ? 'zero' : 'empty';
   return o;
 }
+// 우리 반 약속: 1인당 limit마리까지. 어기면 고른 벌칙 적용
+// reveal 알리기 · ret 돌려놓기 · ban 출어 금지 · grad 단계적 벌칙 · cap 어획 한도
+const PACT_KEYS = ['reveal', 'ret', 'ban', 'grad', 'cap'];
+function clampPact(p, st) {
+  p = p || {};
+  let limit = parseInt(p.limit, 10);
+  if (isNaN(limit)) limit = 1;
+  const o = { limit: Math.max(0, Math.min(st.maxCatch, limit)) };
+  for (const k of PACT_KEYS) o[k] = !!p[k];
+  if (o.cap) { o.reveal = o.ret = o.ban = o.grad = false; }
+  if (o.grad) { o.reveal = o.ret = o.ban = false; }
+  return o;
+}
+const pactActive = P => !!P && PACT_KEYS.some(k => P[k]);
 function grow(st, left) {
   if (left <= 0) return { born: 0, after: 0 };
   const born = Math.floor(left * st.growth / 100);
@@ -53,15 +69,18 @@ function freshGame(room) {
     no: room.gameNo, round: 1, fish: st.start, history: [],
     totals: Array(st.n).fill(0), picks: Array(st.n).fill(null),
     alive: Array(st.n).fill(true), deadRound: Array(st.n).fill(null),
+    strikes: Array(st.n).fill(0), banned: Array(st.n).fill(false),
+    pact: { ...room.pact },
     status: 'play', collapseRound: null, reason: null,
   };
   room.phase = 'lobby';
 }
 function createRoom(settings) {
   const room = {
-    code: newCode(), key: rid(12), settings: clampSettings(settings), rule: '',
+    code: newCode(), key: rid(12), settings: clampSettings(settings), rule: '', pact: null,
     seats: {}, clients: new Set(), gameNo: 0, hint: false, past: [], touched: Date.now(),
   };
+  room.pact = clampPact({}, room.settings);
   freshGame(room);
   rooms.set(room.code, room);
   return room;
@@ -73,26 +92,54 @@ function seatOf(room, sid) {
 }
 function resolveRound(room) {
   const g = room.game, st = room.settings;
-  const picks = g.picks.map((p, i) => (g.alive[i] ? p || 0 : 0));
+  const P = g.pact, active = pactActive(P);
+  const playing = i => g.alive[i] && !g.banned[i];
+  let picks = g.picks.map((p, i) => (playing(i) ? p || 0 : 0));
+  if (P.cap) picks = picks.map(v => Math.min(v, P.limit));
+  // 약속 어김 판정과 벌칙
+  const violators = [], banNext = [], confiscated = Array(st.n).fill(0);
+  if (active && !P.cap) {
+    picks.forEach((v, i) => {
+      if (v <= P.limit) return;
+      violators.push(i);
+      g.strikes[i]++;
+      let conf = false, ban = false;
+      if (P.grad) { conf = g.strikes[i] >= 2; ban = g.strikes[i] >= 3; }
+      else { conf = P.ret; ban = P.ban; }
+      if (conf) confiscated[i] = v - P.limit;
+      if (ban) banNext.push(i);
+    });
+  }
+  const returned = confiscated.reduce((a, b) => a + b, 0);
+  const kept = picks.map((v, i) => v - confiscated[i]);
   const demand = picks.reduce((a, b) => a + b, 0);
+  const take = demand - returned; // 돌려놓은 물고기는 호수에 그대로 남음
   const before = g.fish;
-  const left = Math.max(0, before - demand);
-  if (demand < before) picks.forEach((p, i) => { g.totals[i] += p; });
+  const left = Math.max(0, before - take);
+  if (take < before) kept.forEach((p, i) => { g.totals[i] += p; });
   const { born, after } = grow(st, left);
   // 라운드가 끝나면 살아 있는 사람마다 생존 식량(eat마리)을 먹음.
-  // 먹고 나서 내 물고기가 0마리가 되면 탈락 — 다음 라운드에 나갈 수 없음
+  // out 'empty': 먹을 물고기가 모자라면 탈락 / out 'zero': 먹고 나서 0마리면 탈락
   let eaten = 0;
   const starved = [];
   if (left > 0 && st.eat > 0) {
     g.alive.forEach((on, i) => {
-      if (!on) return;
+      // 출어 금지 라운드에는 먹지 않음 (출어 금지가 곧 탈락이 되지 않게)
+      if (!on || g.banned[i]) return;
+      const enough = g.totals[i] >= st.eat;
       const ate = Math.min(st.eat, g.totals[i]);
       g.totals[i] -= ate;
       eaten += ate;
-      if (g.totals[i] <= 0) { g.totals[i] = 0; g.alive[i] = false; g.deadRound[i] = g.round; starved.push(i); }
+      const out = st.out === 'zero' ? g.totals[i] <= 0 : !enough;
+      if (out) { g.totals[i] = 0; g.alive[i] = false; g.deadRound[i] = g.round; starved.push(i); }
     });
   }
-  g.history.push({ round: g.round, before, demand, caught: Math.min(demand, before), left, born, after, picks, eaten, starved });
+  g.banned = Array(st.n).fill(false);
+  banNext.forEach(i => { if (g.alive[i]) g.banned[i] = true; });
+  g.history.push({
+    round: g.round, before, demand, caught: Math.min(take, before), left, born, after, picks, kept, eaten, starved,
+    violators, returned, banNext: banNext.filter(i => g.alive[i]), confiscated,
+  });
   g.fish = after;
   if (left <= 0) { g.status = 'collapsed'; g.collapseRound = g.round; g.reason = 'lake'; }
   else if (!g.alive.some(Boolean)) { g.status = 'collapsed'; g.collapseRound = g.round; g.reason = 'starved'; }
@@ -110,14 +157,22 @@ function teacherView(room) {
   const on = onlineSids(room);
   const seats = {};
   for (const n in room.seats) seats[n] = { nick: room.seats[n].nick, online: on.has(room.seats[n].sid) };
-  return { role: 't', code: room.code, settings: room.settings, phase: room.phase, rule: room.rule, hint: room.hint, seats, game: room.game, past: room.past };
+  return { role: 't', code: room.code, settings: room.settings, phase: room.phase, rule: room.rule, pact: room.pact, hint: room.hint, seats, game: room.game, past: room.past };
 }
 // TV 화면: 누가 냈는지만 보이고, 몇 마리 골랐는지는 보내지 않음
 function displayView(room) {
   const v = teacherView(room);
   const g = room.game;
   v.role = 'd';
-  v.game = { ...g, picks: g.picks.map(p => (p == null ? null : true)), history: g.history.map(({ picks, ...h }) => h) };
+  // 출어 금지인 친구도 TV에서는 '제출'로 보여서 누가 벌칙을 받는지 드러나지 않게 함
+  const show = !!(g.pact.reveal || g.pact.grad);
+  v.game = {
+    ...g, picks: g.picks.map((p, i) => (p != null || g.banned[i] ? true : null)),
+    banned: g.banned.map(() => false), strikes: g.strikes.map(() => 0),
+    history: g.history.map(({ picks, kept, violators, banNext, confiscated, ...h }) => ({
+      ...h, violatorsCount: show ? violators.length : null, banNextCount: banNext.length,
+    })),
+  };
   return v;
 }
 function studentView(room, sid) {
@@ -128,10 +183,17 @@ function studentView(room, sid) {
     role: 's', code: room.code, phase: room.phase, rule: room.rule, settings: st,
     num, nick: room.seats[num].nick, gameNo: g.no,
     round: g.round, fish: g.fish, status: g.status, collapseRound: g.collapseRound,
-    history: g.history.map(h => ({ round: h.round, before: h.before, demand: h.demand, caught: h.caught, left: h.left, born: h.born, after: h.after, mine: h.picks[i], eaten: h.eaten, starvedCount: h.starved.length, meStarved: h.starved.includes(i) })),
+    history: g.history.map(h => ({
+      round: h.round, before: h.before, demand: h.demand, caught: h.caught, left: h.left, born: h.born, after: h.after,
+      mine: h.picks[i], eaten: h.eaten, starvedCount: h.starved.length, meStarved: h.starved.includes(i),
+      meViolated: h.violators.includes(i), myReturned: h.confiscated[i], meBanNext: h.banNext.includes(i),
+      violatorsCount: g.pact.reveal || g.pact.grad ? h.violators.length : null, returned: h.returned, banNextCount: h.banNext.length,
+    })),
+    pact: g.pact, myStrikes: g.strikes[i], banned: g.banned[i],
     myPick: g.picks[i], myTotal: g.totals[i], alive: g.alive[i], deadRound: g.deadRound[i], reason: g.reason,
     aliveCount: g.alive.filter(Boolean).length,
-    submitted: g.picks.filter((p, j) => p != null && g.alive[j]).length, joined: Object.keys(room.seats).length,
+    playingCount: g.alive.filter((a, j) => a && !g.banned[j]).length,
+    submitted: g.picks.filter((p, j) => p != null && g.alive[j] && !g.banned[j]).length, joined: Object.keys(room.seats).length,
   };
 }
 function sendTo(c, room) {
@@ -153,13 +215,13 @@ function teacherAct(room, b) {
     case 'set': {
       if (room.phase !== 'pick') break;
       const i = +b.i, v = b.v == null ? null : +b.v;
-      if (i >= 0 && i < st.n && g.alive[i] && (v === null || (v >= 0 && v <= st.maxCatch))) g.picks[i] = v;
+      if (i >= 0 && i < st.n && g.alive[i] && !g.banned[i] && (v === null || !g.pact.cap || v <= g.pact.limit) && (v === null || (v >= 0 && v <= st.maxCatch))) g.picks[i] = v;
       break;
     }
     case 'fillEmpty': {
       if (room.phase !== 'pick') break;
       const v = Math.max(0, Math.min(st.maxCatch, +b.v || 0));
-      g.picks = g.picks.map((p, i) => (p == null && g.alive[i] ? v : p));
+      g.picks = g.picks.map((p, i) => (p == null && g.alive[i] && !g.banned[i] ? v : p));
       break;
     }
     case 'clear':
@@ -178,12 +240,14 @@ function teacherAct(room, b) {
         room.phase = 'end';
         room.past.push({
           no: g.no, ok: g.status === 'success', round: g.collapseRound, rounds: st.rounds,
-          total: g.totals.reduce((a, c) => a + c, 0), rule: room.rule.trim(),
+          total: g.totals.reduce((a, c) => a + c, 0), rule: room.rule.trim(), pact: g.pact,
+          alive: g.alive.filter(Boolean).length,
         });
       }
       break;
     case 'newgame':
       room.rule = String(b.rule || '').slice(0, 300);
+      if (b.pact) room.pact = clampPact(b.pact, st);
       freshGame(room);
       break;
     case 'hint':
@@ -304,7 +368,10 @@ const server = http.createServer(async (req, res) => {
       if (room.phase !== 'pick') return json(res, 409, { error: '지금은 고를 수 없어요.' });
       const v = parseInt(b.v, 10);
       if (!(v >= 0 && v <= room.settings.maxCatch)) return json(res, 400, { error: '숫자를 다시 골라 주세요.' });
-      if (!room.game.alive[idxOf(room, num)]) return json(res, 409, { error: '수명이 아웃되어 더 이상 물고기를 잡을 수 없어요.' });
+      const gi = idxOf(room, num);
+      if (!room.game.alive[gi]) return json(res, 409, { error: '탈락해서 더 이상 물고기를 잡을 수 없어요.' });
+      if (room.game.banned[gi]) return json(res, 409, { error: '이번 라운드는 출어 금지예요.' });
+      if (room.game.pact.cap && v > room.game.pact.limit) return json(res, 409, { error: `약속 한도는 ${room.game.pact.limit}마리예요.` });
       room.game.picks[idxOf(room, num)] = v;
       broadcast(room);
       return json(res, 200, { ok: true });

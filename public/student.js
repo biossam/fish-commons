@@ -66,7 +66,7 @@ function render(){const st=V.settings,key=[V.phase,V.gameNo,V.round,V.status].jo
     app.innerHTML=`
     <div class="mehead"><div class="who">${V.num}번${V.nick?' '+esc(V.nick):''}</div><div class="mine">내 물고기 🐟 <span id="myTotal">${V.myTotal}</span></div></div>
     <div id="conn" class="err" style="display:none;margin:0 0 10px">연결이 끊겼어요. 다시 연결하는 중…</div>
-    ${V.rule.trim()?`<div class="rulebar"><b>📜 약속</b><span>${esc(V.rule).replace(/\n/g,'<br>')}</span></div>`:''}
+    ${pactBar(V.pact,V.rule)}
     <div class="card"><div id="lakeBox"></div>
       <div class="fishcount" style="margin-top:14px"><div><div class="lbl">호수의 물고기</div><div class="n" style="font-size:42px">${V.fish}<small> / ${st.cap}마리</small></div></div>
       <div style="text-align:right"><div class="lbl">라운드</div><div class="jua" style="font-size:28px">${Math.min(V.round,st.rounds)} <small style="font-size:16px;color:var(--sub)">/ ${st.rounds}</small></div></div></div>
@@ -79,22 +79,38 @@ function render(){const st=V.settings,key=[V.phase,V.gameNo,V.round,V.status].jo
   const main=document.getElementById('main');
   if(V.phase==='lobby')main.innerHTML=`<div class="waitbox"><div class="e">🎣</div><h2>들어왔어요!</h2><p>선생님이 시작할 때까지 기다려요.</p><p>지금 <b>${V.joined}명</b>이 마을에 있어요.</p></div>`;
   else if(V.alive===false&&V.phase!=='end')main.innerHTML=outHTML();
+  else if(V.phase==='pick'&&V.banned)main.innerHTML=bannedHTML();
   else if(V.phase==='pick')main.innerHTML=pickHTML();
   else if(V.phase==='result')main.innerHTML=resultHTML(true);
   else main.innerHTML=endHTML();
 }
 function outHTML(){const last=V.history[V.history.length-1];
   return `<div class="waitbox"><div class="e">😵</div><h2>탈락했어요</h2>
-    <p>${V.deadRound}라운드가 끝나고 먹고 나니 내 물고기가 <b>0마리</b>가 되었어요.<br>다음 라운드에는 나갈 수 없어요.</p>
+    <p>${V.deadRound}라운드가 끝나고 ${V.settings.out==='zero'?'먹고 나니 내 물고기가 <b>0마리</b>가 되었어요':'먹을 물고기가 <b>없었어요</b>'}.<br>다음 라운드에는 나갈 수 없어요.</p>
     <p>친구들이 호수를 끝까지 지킬 수 있을지 TV를 보며 응원해요.</p></div>
   ${V.phase==='result'&&last?resultHTML(false):''}`}
-function pickHTML(){const st=V.settings,eat=st.eat||0;let b='';
-  for(let v=0;v<=st.maxCatch;v++){const after=V.myTotal+v-eat,out=eat>0&&after<=0;
-    b+=`<button class="${V.myPick===v?'sel':''}" data-pick="${v}">${v}마리 ${eat>0?`<small>${out?'→ 0마리, 탈락!':`→ 먹고 ${after}마리`}</small>`:v===0?'<small>쉬기</small>':''}</button>`}
+function bannedHTML(){return `<div class="waitbox"><div class="e">⛔</div><h2>이번 라운드는 출어 금지</h2>
+  <p>약속보다 많이 잡아서 이번 라운드에는 물고기를 잡을 수 없어요.<br>다음 라운드부터 다시 잡을 수 있어요.</p>
+  ${V.settings.eat>0?`<p>출어 금지 라운드에는 물고기를 먹지 않아서 탈락하지는 않아요. 지금 내 물고기는 <b>${V.myTotal}마리</b>예요.</p>`:''}</div>`}
+function pickHTML(){const st=V.settings,eat=st.eat||0,P=V.pact||{},on=pactOn(P);let b='';
+  for(let v=0;v<=st.maxCatch;v++){
+    const over=on&&v>P.limit,blocked=over&&P.cap;
+    const keep=over&&(P.ret||(P.grad&&V.myStrikes>=1))?P.limit:v;
+    const out=outsFor(st,V.myTotal,keep),after=Math.max(0,V.myTotal+keep-eat);
+    let tip=eat>0?(out?'→ 탈락!':`→ 먹고 ${after}마리`):(v===0?'쉬기':'');
+    if(blocked)tip='약속 한도';else if(over)tip='약속 어김! '+tip;
+    b+=`<button class="${V.myPick===v?'sel':''} ${over?'over':''}" data-pick="${v}" ${blocked?'disabled':''}>${v}마리 ${tip?`<small>${tip}</small>`:''}</button>`}
   return `<h2 style="font-size:24px">🎣 ${V.round}라운드: 몇 마리 잡을까요?</h2>
-  <p class="muted" style="margin:6px 0 0">친구에게 보여 주지 말고 몰래 골라요.${st.eat>0?`<br>라운드가 끝나면 <b>${st.eat}마리</b>를 먹어요. 먹고 나서 <b>0마리</b>면 탈락!`:''}</p>
+  <p class="muted" style="margin:6px 0 0">친구에게 보여 주지 말고 몰래 골라요.${st.eat>0?`<br>라운드가 끝나면 <b>${st.eat}마리</b>를 먹어요. ${st.out==='zero'?'먹고 나서 <b>0마리</b>면':'먹을 물고기가 <b>없으면</b>'} 탈락!`:''}${on&&!P.cap?`<br>📜 약속은 <b>${P.limit}마리</b>까지예요.${V.myStrikes?` 나는 지금까지 <b>${V.myStrikes}번</b> 어겼어요.`:''}`:''}</p>
   <div class="bigpick">${b}</div>
-  <div class="msg ${V.myPick!=null?'good':'warn'}" style="margin-top:14px;font-size:16px">${V.myPick!=null?`<b>${V.myPick}마리</b>로 냈어요! 결과가 나오기 전까지는 바꿀 수 있어요.`:'아직 고르지 않았어요.'}<br><span class="muted">우리 반 ${V.submitted} / ${V.aliveCount}명 냈어요</span></div>`}
+  <div class="msg ${V.myPick!=null?'good':'warn'}" style="margin-top:14px;font-size:16px">${V.myPick!=null?`<b>${V.myPick}마리</b>로 냈어요! 결과가 나오기 전까지는 바꿀 수 있어요.`:'아직 고르지 않았어요.'}<br><span class="muted">우리 반 ${V.submitted} / ${V.playingCount}명 냈어요</span></div>`}
+function myPenaltyHTML(e){const P=V.pact||{};if(!pactOn(P)||P.cap)return '';const lines=[];
+  if(e.meViolated){lines.push(`🚨 약속(${P.limit}마리)보다 많이 잡았어요.${e.myReturned?` <b>${e.myReturned}마리</b>는 호수로 돌려놓았어요.`:P.grad&&V.myStrikes===1?' 이번엔 경고예요. 다음부터는 벌칙이 있어요!':''}`);
+    if(e.meBanNext)lines.push('⛔ 다음 라운드는 <b>출어 금지</b>예요.')}
+  else if(e.mine!=null)lines.push('🌟 나는 약속을 지켰어요!');
+  if(e.violatorsCount!=null)lines.push(e.violatorsCount?`우리 반에서 약속을 어긴 친구 <b>${e.violatorsCount}명</b>`:'우리 반 모두 약속을 지켰어요!');
+  if(e.returned)lines.push(`호수로 돌아간 물고기 <b>${e.returned}마리</b>`);
+  return `<div class="penal" style="margin-bottom:10px">${lines.join('<br>')}</div>`}
 function resultHTML(waiting){const st=V.settings,e=V.history[V.history.length-1];if(!e)return '';const m=roundMsg(e,V.status,st);
   return `<h2 style="font-size:24px">${e.round}라운드 결과</h2>
   <div class="ministeps">
@@ -103,7 +119,8 @@ function resultHTML(waiting){const st=V.settings,e=V.history[V.history.length-1]
     <div class="step" style="background:#e6f4ff"><div class="v">${e.after}</div><div class="l">지금 호수 물고기</div></div>
     <div class="step" style="background:var(--yellow2)"><div class="v">${e.mine==null?0:e.mine}</div><div class="l">내가 잡으려 한 물고기</div></div>
   </div>
-  ${st.eat>0&&V.status!=='collapsed'&&(V.alive||e.meStarved)?`<div class="msg ${e.meStarved?'bad':'good'}" style="font-size:16px;margin-bottom:10px">🍚 살기 위해 ${st.eat}마리를 먹었어요. ${e.meStarved?'내 물고기가 <b>0마리</b>! 탈락이에요. 😵':`내 물고기는 <b>${V.myTotal}마리</b> 남았어요.`}</div>`:''}
+  ${st.eat>0&&V.status!=='collapsed'&&(V.alive||e.meStarved)?`<div class="msg ${e.meStarved?'bad':'good'}" style="font-size:16px;margin-bottom:10px">🍚 살기 위해 ${st.eat}마리를 먹었어요. ${e.meStarved?(st.out==='zero'?'내 물고기가 <b>0마리</b>! 탈락이에요. 😵':'그런데 먹을 물고기가 모자랐어요. 탈락이에요. 😵'):`내 물고기는 <b>${V.myTotal}마리</b> 남았어요.`}</div>`:''}
+  ${myPenaltyHTML(e)}
   ${e.starvedCount&&!e.meStarved?`<div class="msg warn" style="font-size:16px;margin-bottom:10px">😵 이번 라운드에 <b>${e.starvedCount}명</b>이 탈락했어요.</div>`:''}
   <div class="msg ${m.cls}" style="font-size:16px">${m.msg}</div>
   ${waiting&&V.status==='play'?`<p class="muted" style="text-align:center;margin-top:12px">선생님이 다음 라운드를 열 때까지 기다려요.</p>`:''}`}
