@@ -22,7 +22,7 @@ function renderJoin(err){
   let nums='';
   if(info)nums=info.nums.map(n=>`<button class="${form.num===n?'sel':''}" data-num="${n}" ${info.taken.includes(n)&&!(me&&me.num===n)&&form.oldNum!==n?'disabled':''}>${n}</button>`).join('');
   app.innerHTML=`
-  <div class="mehead"><div class="logo"><div class="badge"><svg viewBox="0 0 42 26"><use href="#fishSym"/></svg></div><div><h1 style="font-size:22px">물고기 마을의 호수</h1><small>마을에 들어가기</small></div></div></div>
+  <div class="mehead"><div class="logo"><img class="logobadge" src="/img/badge.png" alt="물고기 마을의 호수 배지"><div><h1 style="font-size:22px">물고기 마을의 호수</h1><small>마을에 들어가기</small></div></div></div>
   <div class="card">
     <h3 style="font-size:19px">① 참여 코드</h3>
     <input class="field codefield" id="code" inputmode="numeric" maxlength="6" placeholder="000000" value="${esc(form.code)}" autocomplete="off">

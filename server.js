@@ -372,7 +372,7 @@ const SEC_HEADERS = {
 };
 
 /* ---------- HTTP ---------- */
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 function json(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(obj));
@@ -411,11 +411,9 @@ const server = http.createServer({ headersTimeout: 10e3, requestTimeout: 15e3, c
   const noRoom = (msg, code) => { noteMiss(req, code); return json(res, 404, { error: msg }); };
   try {
     if (p.startsWith('/api/') && blockedForGuessing(req) && p !== '/api/qr') return tooMany();
-    if (p === '/robots.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('User-agent: *\nDisallow: /\n'); }
-    if (p === '/favicon.ico' || p === '/favicon.svg') {
-      res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' });
-      return res.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 26"><path d="M38 13 L28 4 Q27 13 28 22 Z" fill="#ff8a7a"/><ellipse cx="16" cy="13" rx="15" ry="10" fill="#ff8a7a"/><circle cx="9" cy="10.5" r="2.6" fill="#2e3a59"/></svg>');
-    }
+    // 검색 노출은 noindex 머리글로 막고, 카카오톡 등 링크 미리보기는 썸네일을 읽을 수 있게 열어 둠
+    if (p === '/robots.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('User-agent: *\nAllow: /\n'); }
+    if (p === '/favicon.ico') return serveStatic(req, res, '/img/favicon-64.png');
     if (p === '/healthz') return json(res, 200, { ok: true });
     // 다른 사이트에서 몰래 보내는 요청(CSRF) 막기: POST는 JSON으로만 받음
     if (req.method === 'POST' && !String(req.headers['content-type'] || '').startsWith('application/json')) return json(res, 415, { error: 'json only' });

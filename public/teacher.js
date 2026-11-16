@@ -73,7 +73,7 @@ function topHTML(){let dots='';
       if(g.status==='collapsed'&&r>=g.collapseRound)c=r===g.collapseRound?'now':'dead';
       else if(g.status==='success'||r<g.round)c='done';else if(r===g.round)c='now';
       dots+=`<div class="rdot ${c}">${r}</div>`}}
-  return `<div class="top"><div class="logo"><div class="badge"><svg viewBox="0 0 42 26"><use href="#fishSym"/></svg></div>
+  return `<div class="top"><div class="logo"><img class="logobadge" src="/img/badge.png" alt="물고기 마을의 호수 배지">
     <div><h1>물고기 마을의 호수</h1><small>공유지의 비극 체험 게임</small></div></div>
     <div class="rounds">${dots}</div>
     ${V?`<button class="codechip" data-act="qr">참여 코드 <b>${V.code}</b></button>
@@ -135,7 +135,8 @@ function renderIntro(notice){
     </div>
   </div>
   <div class="card" style="margin-top:16px" id="rosterCard">${rosterHTML(st)}</div>
-  <div class="startrow"><button class="btn big primary" data-act="create">🎣 방 만들기</button></div>`;
+  <div class="startrow"><button class="btn big primary" data-act="create">🎣 방 만들기</button></div>
+  <p class="credit">배지·아이콘: Google Gemini로 생성한 이미지</p>`;
 }
 
 function renderTVCode(notice){V=null;lastKey='';

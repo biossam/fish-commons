@@ -60,3 +60,7 @@
 ### 공격 점검
 `tools/security-check.mjs`는 코드 맞히기, TV 엿보기, 자리 빼앗기, 연결 폭탄, CSRF, 별명 공격, 경로 조작, slowloris 등 20가지 공격을 직접 시도해 봐요.
 로컬에서 `PORT=3123 node server.js`를 켠 뒤 `node tools/security-check.mjs`로 실행해요. 실제 수업 서버에는 돌리지 마세요.
+
+## 그림 출처
+- 배지·아이콘·썸네일의 배지 그림: Google Gemini로 생성한 이미지 (`public/img/`)
+- QR 코드: `vendor/QRCode` (Apache-2.0)
