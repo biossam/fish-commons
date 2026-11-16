@@ -28,8 +28,8 @@ function renderJoin(err){
     <input class="field codefield" id="code" inputmode="numeric" maxlength="4" placeholder="0000" value="${esc(form.code)}" autocomplete="off">
     ${info?`<h3 style="font-size:19px;margin-top:18px">② 내 번호</h3><div class="numgrid">${nums}</div>
       <p class="muted" style="margin:0">흐린 번호는 이미 친구가 들어온 번호예요.</p>
-      <h3 style="font-size:19px;margin-top:18px">③ 닉네임 <span class="muted">(안 써도 돼요)</span></h3>
-      <input class="field" id="nick" maxlength="10" placeholder="예) 고등어왕" value="${esc(form.nick)}" autocomplete="off">
+      <h3 style="font-size:19px;margin-top:18px">③ 닉네임 <span class="muted">(안 써도 돼요 · 실명 말고 별명으로)</span></h3>
+      <input class="field" id="nick" maxlength="10" placeholder="예) 고등어왕 (실명은 쓰지 마세요)" value="${esc(form.nick)}" autocomplete="off">
       <div class="startrow"><button class="btn big primary" data-act="join" ${form.num?'':'disabled'}>🐟 들어가기</button></div>`
       :`<p class="muted" style="text-align:center">선생님 TV에 나온 숫자 4자리를 넣어 주세요.</p>`}
     ${err?`<div class="err">${esc(err)}</div>`:''}

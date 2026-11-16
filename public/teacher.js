@@ -203,7 +203,7 @@ function renderGrid(){const box=document.getElementById('grid');if(!box)return;c
     if(TV)b=`<div class="muted" style="text-align:center;padding:6px 0;font-size:15px">${p!=null?'<b style="color:#2a86c4">제출했어요 ✓</b>':'고르는 중…'}</div>`;
     else for(let v=0;v<=st.maxCatch;v++)b+=`<button class="${p===v?'sel c'+v:''}" data-act="set" data-i="${i}" data-v="${v}" ${g.pact&&g.pact.cap&&v>g.pact.limit?'disabled style="opacity:.3"':''}>${v}</button>`;
     const dev=s?`<span class="dot ${s.online?'':'away'}"></span>${s.online?'기기로 참여':'기기 연결 끊김'}`:(TV?'아직 안 들어옴':'선생님이 입력');
-    h+=`<div class="st ${p!=null?'done':''} ${s?'byDevice':''}"><div class="chk">✓</div><div class="nm"><b title="${esc(label(i))}">${esc(label(i))}</b><span>모은 🐟 ${g.totals[i]}</span></div><div class="dev">${dev}${!TV&&g.strikes&&g.strikes[i]?`<span class="strike">⚠️ 약속 ${g.strikes[i]}번 어김</span>`:''}</div>${TV?b:`<div class="opts">${b}</div>`}</div>`});
+    h+=`<div class="st ${p!=null?'done':''} ${s?'byDevice':''}"><div class="chk">✓</div><div class="nm"><b title="${esc(label(i))}">${esc(label(i))}</b><span>${TV?'':`모은 🐟 ${g.totals[i]}`}</span></div><div class="dev">${dev}${!TV&&g.strikes&&g.strikes[i]?`<span class="strike">⚠️ 약속 ${g.strikes[i]}번 어김</span>`:''}</div>${TV?b:`<div class="opts">${b}</div>`}</div>`});
   box.innerHTML=h;
   document.getElementById('cntDone').textContent=g.picks.filter((p,i)=>(p!=null||isBanned(i))&&isAlive(i)).length;
   const ca=document.getElementById('cntAlive');if(ca)ca.textContent=aliveCount();
@@ -250,7 +250,7 @@ function renderEnd(){const g=V.game,st=V.settings,ok=g.status==='success',tot=su
   rows.push(`<tr><td>호수를 지키며 최대로<br><span class="muted">(매 라운드 반 전체 ${best.first}마리 정도)</span></td><td><span class="tag ok">${st.rounds}라운드 완주</span></td><td>약 ${Math.max(0,best.per).toFixed(1)}마리</td></tr>`);
   rows.push(`<tr class="us"><td>우리 반 실제 결과</td><td>${ok?`<span class="tag ok">${st.rounds}라운드 완주</span>`:`<span class="tag no">${g.collapseRound}라운드에 붕괴</span>`}</td><td>${ok?(aliveCount()<st.n?`살아남은 ${aliveCount()}명 평균 ${(tot/Math.max(1,aliveCount())).toFixed(1)}마리`:(tot/st.n).toFixed(1)+'마리 (평균)'):'0마리'}</td></tr>`);
   const order=g.totals.map((v,i)=>({v,i})).sort((a,b)=>b.v-a.v),mx=Math.max(1,...g.totals);
-  const rank=order.map((o,j)=>`<div class="rk ${ok&&isAlive(o.i)?'':'lost'}"><span class="muted">${j+1}</span><span class="nm">${isAlive(o.i)?'':'😵 '}${esc(label(o.i))}</span><span class="bar"><i style="width:${o.v/mx*100}%"></i></span><span class="v">${o.v}</span></div>`).join('');
+  const rank=order.map((o,j)=>`<div class="rk ${ok&&isAlive(o.i)?'':'lost'}"><span class="muted">${j+1}</span><span class="nm">${isAlive(o.i)?'':'😵 '}${TV?'':esc(label(o.i))}</span><span class="bar"><i style="width:${o.v/mx*100}%"></i></span><span class="v">${o.v}</span></div>`).join('');
   app.innerHTML=topHTML()+ruleBar()+`
   <div class="card">
     <div class="endhead"><div class="emo">${ok?'🎉':'😵'}</div>
@@ -269,7 +269,7 @@ function renderEnd(){const g=V.game,st=V.settings,ok=g.status==='success',tot=su
     <div class="card cmp"><h3>🤔 이렇게 했다면?</h3><p class="muted">1인당 마지막에 가질 수 있는 물고기</p>
       <table><tr><th>방법</th><th>호수는?</th><th>1인당</th></tr>${rows.join('')}</table>
       <p class="muted" style="margin-top:10px">욕심내서 많이 잡으면 그 순간엔 내가 더 많이 갖지만, 호수가 무너지면 모두 0마리가 돼요.${st.eat>0?' 그렇다고 너무 적게 잡으면 먹을 물고기가 없어 내가 탈락해요. 살아남을 만큼만 잡는 게 핵심이에요.':''}</p></div>
-    <div class="card"><h3>${ok?'🏅 잡은 물고기':'🫥 잡았지만 사라진 물고기'}</h3><p class="muted">${ok?'많이 잡은 친구와 적게 잡은 친구가 있다면, 그건 공평했을까요?':'가장 많이 잡은 친구도 결국 0마리가 되었어요.'}</p><div class="rank">${rank}</div></div>
+    <div class="card"><h3>${ok?'🏅 잡은 물고기':'🫥 잡았지만 사라진 물고기'}</h3><p class="muted">${ok?'많이 잡은 친구와 적게 잡은 친구가 있다면, 그건 공평했을까요?':'가장 많이 잡은 친구도 결국 0마리가 되었어요.'}${TV?' (TV에는 이름 없이 보여요)':''}</p><div class="rank">${rank}</div></div>
   </div>
   <div class="concept"><h3>💡 공유지의 비극</h3>
     <p>여러 사람이 <b>함께 쓰는 자원</b>(호수, 바다, 숲, 공기…)을 저마다 “나 하나쯤이야” 하며 자기 이익만 생각해 쓰면, 결국 자원이 망가져 <b>모두가 손해</b>를 보게 되는 일을 말해요.</p>

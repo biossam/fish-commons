@@ -246,7 +246,7 @@ function teacherAct(room, b) {
       }
       break;
     case 'newgame':
-      room.rule = String(b.rule || '').slice(0, 300);
+      room.rule = cleanMulti(b.rule, 300);
       if (b.pact) room.pact = clampPact(b.pact, st);
       freshGame(room);
       break;
@@ -265,7 +265,7 @@ function joinSeat(room, b) {
   const st = room.settings;
   const num = parseInt(b.num, 10);
   if (!st.nums.includes(num)) return [400, { error: '번호를 다시 골라 주세요.' }];
-  const nick = String(b.nick || '').trim().replace(/\s+/g, ' ').slice(0, 10);
+  const nick = cleanText(b.nick, 10);
   let sid = typeof b.sid === 'string' && /^[a-f0-9]{24}$/.test(b.sid) ? b.sid : null;
   const cur = room.seats[num];
   if (cur && cur.sid !== sid) return [409, { error: `${num}번에는 이미 누가 들어와 있어요. 선생님께 말해 주세요.` }];
@@ -287,6 +287,61 @@ function qrSVG(text) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n + m * 2} ${n + m * 2}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#2e3a59"/></svg>`;
 }
 
+/* ---------- 보안: 접속 횟수 제한 · 키 확인 · 입력 정리 ---------- */
+// 한 반(23명)이 학교의 같은 공인 IP로 들어오는 것을 생각해 넉넉하게 잡음
+const LIMITS = {
+  room: [30, 60 * 60e3],    // 방 만들기: 1시간에 30번
+  join: [300, 10 * 60e3],   // 들어가기
+  pick: [4000, 10 * 60e3],  // 고르기
+  info: [800, 10 * 60e3],   // 방 정보
+  events: [800, 10 * 60e3], // 실시간 연결
+  teacher: [3000, 10 * 60e3],
+};
+// 없는 방 코드를 '서로 다른 코드로' 여러 번 넣으면 잠시 막음 (코드 맞히기 막기).
+// 서버가 다시 시작되어 반 전체가 같은 옛 코드로 404를 받는 경우는 코드가 1개라 막히지 않음
+const MISS_CODES = 30, MISS_WINDOW = 10 * 60e3;
+const misses = new Map();
+const MAX_ROOMS = 300, MAX_CLIENTS_PER_ROOM = 120;
+const hits = new Map();
+function clientIp(req) {
+  const h = req.headers;
+  return String(h['cf-connecting-ip'] || String(h['x-forwarded-for'] || '').split(',')[0] || req.socket.remoteAddress || '').trim();
+}
+function overLimit(req, bucket) {
+  const [max, win] = LIMITS[bucket];
+  const k = bucket + '|' + clientIp(req), now = Date.now();
+  let h = hits.get(k);
+  if (!h || now > h.reset) { h = { n: 0, reset: now + win }; hits.set(k, h); }
+  h.n++;
+  return h.n > max;
+}
+function noteMiss(req, code) {
+  const ip = clientIp(req), now = Date.now();
+  let m = misses.get(ip);
+  if (!m || now > m.reset) { m = { codes: new Set(), reset: now + MISS_WINDOW }; misses.set(ip, m); }
+  if (m.codes.size < 1000) m.codes.add(String(code).slice(0, 12));
+}
+function blockedForGuessing(req) {
+  const m = misses.get(clientIp(req));
+  return !!m && Date.now() <= m.reset && m.codes.size > MISS_CODES;
+}
+function keyOk(room, key) {
+  if (!room || typeof key !== 'string' || key.length !== room.key.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(key), Buffer.from(room.key));
+}
+// 글자 수와 위험한 기호를 정리 (화면에서도 한 번 더 escape 함)
+const cleanText = (t, n) => String(t == null ? '' : t).replace(/[\u0000-\u001f\u007f<>"'`]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
+const cleanMulti = (t, n) => String(t == null ? '' : t).replace(/[\u0000-\u0009\u000b-\u001f\u007f<>`]/g, '').slice(0, n);
+
+const SEC_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'X-Frame-Options': 'DENY',
+  'X-Robots-Tag': 'noindex, nofollow',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+};
+
 /* ---------- HTTP ---------- */
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
 function json(res, code, obj) {
@@ -296,9 +351,13 @@ function json(res, code, obj) {
 function readBody(req) {
   return new Promise(resolve => {
     let d = '';
-    req.on('data', ch => { d += ch; if (d.length > 20000) req.destroy(); });
-    req.on('end', () => { try { resolve(JSON.parse(d || '{}')); } catch (e) { resolve({}); } });
-    req.on('error', () => resolve({}));
+    let done = false;
+    const finish = v => { if (!done) { done = true; resolve(v); } };
+    let big = false;
+    req.on('data', ch => { if (big) return; d += ch; if (d.length > 20000) { big = true; d = ''; finish({}); } });
+    req.on('end', () => { if (big) return; try { finish(JSON.parse(d || '{}')); } catch (e) { finish({}); } });
+    req.on('error', () => finish({}));
+    req.on('close', () => finish({}));
   });
 }
 function serveStatic(req, res, pathname) {
@@ -315,9 +374,14 @@ function serveStatic(req, res, pathname) {
 }
 
 const server = http.createServer(async (req, res) => {
+  for (const k in SEC_HEADERS) res.setHeader(k, SEC_HEADERS[k]);
   const url = new URL(req.url, 'http://x');
   const p = url.pathname, q = url.searchParams;
+  const tooMany = () => json(res, 429, { error: '요청이 너무 많아요. 잠시 뒤 다시 해 주세요.' });
+  const noRoom = (msg, code) => { noteMiss(req, code); return json(res, 404, { error: msg }); };
   try {
+    if (p.startsWith('/api/') && blockedForGuessing(req) && p !== '/api/qr') return tooMany();
+    if (p === '/robots.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('User-agent: *\nDisallow: /\n'); }
     if (p === '/favicon.ico' || p === '/favicon.svg') {
       res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=86400' });
       return res.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 42 26"><path d="M38 13 L28 4 Q27 13 28 22 Z" fill="#ff8a7a"/><ellipse cx="16" cy="13" rx="15" ry="10" fill="#ff8a7a"/><circle cx="9" cy="10.5" r="2.6" fill="#2e3a59"/></svg>');
@@ -325,44 +389,50 @@ const server = http.createServer(async (req, res) => {
     if (p === '/healthz') return json(res, 200, { ok: true, rooms: rooms.size });
 
     if (p === '/api/qr') {
-      const t = String(q.get('t') || '').slice(0, 200);
+      const t = String(q.get('t') || '').slice(0, 120);
       res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' });
       return res.end(qrSVG(t));
     }
     if (p === '/api/room' && req.method === 'POST') {
+      if (overLimit(req, 'room')) return tooMany();
+      if (rooms.size >= MAX_ROOMS) return json(res, 503, { error: '지금은 방을 더 만들 수 없어요. 잠시 뒤 다시 해 주세요.' });
       const b = await readBody(req);
       const room = createRoom(b.settings);
       return json(res, 200, { code: room.code, key: room.key });
     }
     if (p === '/api/check') {
       const room = rooms.get(q.get('c'));
-      return json(res, room && room.key === q.get('key') ? 200 : 404, { ok: !!room });
+      return json(res, keyOk(room, q.get('key')) ? 200 : 404, { ok: !!room });
     }
     if (p === '/api/info') {
+      if (overLimit(req, 'info')) return tooMany();
       const room = rooms.get(q.get('c'));
-      if (!room) return json(res, 404, { error: '그런 방이 없어요. 코드를 다시 확인해 주세요.' });
+      if (!room) return noRoom('그런 방이 없어요. 코드를 다시 확인해 주세요.', q.get('c') || '');
       return json(res, 200, { nums: room.settings.nums, taken: Object.keys(room.seats).map(Number) });
     }
     if (p === '/api/teacher' && req.method === 'POST') {
+      if (overLimit(req, 'teacher')) return tooMany();
       const b = await readBody(req);
       const room = rooms.get(String(b.c));
-      if (!room || room.key !== b.key) return json(res, 404, { error: '방이 없어요.' });
+      if (!keyOk(room, b.key)) return noRoom('방이 없어요.', 'key:' + b.c);
       const ok = teacherAct(room, b);
       if (ok) broadcast(room);
       return json(res, ok ? 200 : 400, { ok });
     }
     if (p === '/api/join' && req.method === 'POST') {
+      if (overLimit(req, 'join')) return tooMany();
       const b = await readBody(req);
       const room = rooms.get(String(b.c));
-      if (!room) return json(res, 404, { error: '그런 방이 없어요. 코드를 다시 확인해 주세요.' });
+      if (!room) return noRoom('그런 방이 없어요. 코드를 다시 확인해 주세요.', b.c);
       const [code, out] = joinSeat(room, b);
       if (code === 200) broadcast(room);
       return json(res, code, out);
     }
     if (p === '/api/pick' && req.method === 'POST') {
+      if (overLimit(req, 'pick')) return tooMany();
       const b = await readBody(req);
       const room = rooms.get(String(b.c));
-      if (!room) return json(res, 404, { error: '방이 없어요.' });
+      if (!room) return noRoom('방이 없어요.', b.c);
       const num = seatOf(room, b.sid);
       if (!num) return json(res, 404, { error: 'kicked' });
       if (room.phase !== 'pick') return json(res, 409, { error: '지금은 고를 수 없어요.' });
@@ -377,11 +447,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (p === '/api/events') {
+      if (overLimit(req, 'events')) return tooMany();
       const room = rooms.get(q.get('c'));
       const role = q.get('role');
-      if (!room) return json(res, 404, { error: 'no room' });
-      if (role === 't' && room.key !== q.get('key')) return json(res, 403, { error: 'key' });
+      if (!room) return noRoom('no room', q.get('c'));
+      if (role === 't' && !keyOk(room, q.get('key'))) return noRoom('key', 'key:' + q.get('c'));
       if (role !== 't' && role !== 's' && role !== 'd') return json(res, 400, { error: 'role' });
+      if (room.clients.size >= MAX_CLIENTS_PER_ROOM) return tooMany();
       res.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive', 'X-Accel-Buffering': 'no',
@@ -398,13 +470,27 @@ const server = http.createServer(async (req, res) => {
       });
       return;
     }
-    if (req.method === 'GET') return serveStatic(req, res, decodeURIComponent(p));
+    if (req.method === 'GET') {
+      let dp;
+      try { dp = decodeURIComponent(p); } catch (e) { res.writeHead(400); return res.end(); }
+      return serveStatic(req, res, dp);
+    }
     res.writeHead(405); res.end();
   } catch (e) {
     console.error(e);
     if (!res.headersSent) json(res, 500, { error: '서버 오류' });
   }
 });
+
+// 오래된 접속 기록 정리
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, h] of hits) if (now > h.reset) hits.delete(k);
+  for (const [k, m] of misses) if (now > m.reset) misses.delete(k);
+}, 5 * 60e3);
+// 예상하지 못한 오류가 나도 서버가 꺼지지 않게 (수업 중 방이 사라지지 않도록)
+process.on('uncaughtException', e => console.error('uncaught', e && e.message));
+process.on('unhandledRejection', e => console.error('unhandled', e && e.message));
 
 // 8시간 넘게 쓰지 않은 방 정리
 setInterval(() => {
